@@ -1,0 +1,5 @@
+uploads/
+*.webm
+*.pdf
+*.docx
+.vscode/
