@@ -163,6 +163,26 @@ def handle_signal(data):
         data['from'] = users[request.sid]['username']
         emit('webrtc_signal', data, to=sid_map[target])
 
+@socketio.on("call-user")
+def handle_call_user():
+    emit("incoming-call", broadcast=True, include_self=False)
+
+@socketio.on("video-call-user")
+def handle_video_call_user():
+    emit("incoming-call", broadcast=True, include_self=False)
+
+@socketio.on("call-accepted")
+def handle_call_accepted():
+    emit("call-started", broadcast=True, include_self=False)
+
+@socketio.on("call-rejected")
+def handle_call_rejected():
+    emit("call-ended", broadcast=True, include_self=False)
+
+@socketio.on("end-call")
+def handle_end_call():
+    emit("call-ended", broadcast=True, include_self=False)
+
 @socketio.on('disconnect')
 def handle_disconnect():
     user = users.pop(request.sid, None)
