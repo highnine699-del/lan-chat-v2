@@ -986,6 +986,27 @@
       if (e.key === 'Enter') doLogin();
     });
 
+    // ─── LOGIN ────────────────────────────────────────────────
+    function doLogin() {
+      const name = document.getElementById('username-input').value.trim();
+      if (!name) { alert('Please enter a name'); return; }
+      state.username = name;
+
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('app').style.display = 'flex';
+      document.getElementById('active-chat').style.display = 'flex';
+      document.getElementById('chat-placeholder').style.display = 'none';
+
+      // Set avatar
+      const color = stringToColor(name);
+      document.getElementById('my-avatar').style.background = color;
+      document.getElementById('my-avatar').textContent = name[0].toUpperCase();
+      document.getElementById('my-name').textContent = name;
+
+      connectSocket();
+      switchChat('global');
+    }
+
     // ─── SOCKET ────────────────────────────────────────────────
     function connectSocket() {
       state.socket = io();
@@ -1462,7 +1483,6 @@
       state.callTarget = state.currentChat;
       state.callType = type;
       state.callState = 'calling';
-      state.iceCandidateBuffer = [];  // Clear buffer for new call
 
       console.log('[Call] Starting', type, 'call to', state.callTarget);
 
