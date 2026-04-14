@@ -974,26 +974,8 @@
       callType: null,
       muted: false,
       camOff: false,
-    };
-
-    // ─── LOGIN ────────────────────────────────────────────────
-    function doLogin() {
-      const name = document.getElementById('username-input').value.trim();
-      if (!name) { alert('Please enter a name'); return; }
-      state.username = name;
-
-      document.getElementById('login-screen').style.display = 'none';
-      document.getElementById('app').style.display = 'flex';
-      document.getElementById('active-chat').style.display = 'flex';
-      document.getElementById('chat-placeholder').style.display = 'none';
-
-      // Set avatar
-      const color = stringToColor(name);
-      document.getElementById('my-avatar').style.background = color;
-      document.getElementById('my-avatar').textContent = name[0].toUpperCase();
-      document.getElementById('my-name').textContent = name;
-
-      connectSocket();
+      callState: 'idle',             // idle, calling, ringing, connected, ended
+      callTimeout: null,             // timeout for unanswered calls
       switchChat('global');
     }
 
@@ -1460,6 +1442,12 @@
     const ICE_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
     async function startCall(type) {
+      // Prevent multiple simultaneous calls
+      if (state.callState !== 'idle') {
+        alert('You are already in a call. End it first.');
+        return;
+      }
+
       if (state.currentChat === 'global') {
         alert('Voice/video calls are only available in private chats. Select a person first.');
         return;
@@ -1473,6 +1461,7 @@
 
       state.callTarget = state.currentChat;
       state.callType = type;
+      state.callState = 'calling';
 
       const overlay = document.getElementById('call-overlay');
       overlay.classList.add('active');
@@ -1484,6 +1473,14 @@
       document.getElementById('call-name').textContent = state.callTarget;
       document.getElementById('call-status').textContent = type === 'voice' ? 'Calling...' : 'Video calling...';
 
+      // Set timeout for unanswered calls (30 seconds)
+      state.callTimeout = setTimeout(() => {
+        if (state.callState === 'calling') {
+          alert('📞 Call timeout - No answer');
+          endCall();
+        }
+      }, 30000);
+
       try {
         const constraints = type === 'video' ? { audio: true, video: true } : { audio: true, video: false };
         state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -1492,24 +1489,40 @@
           document.getElementById('local-video').srcObject = state.localStream;
         }
 
+        // Clean up old peer connection if exists
+        if (state.peerConnection) {
+          state.peerConnection.close();
+          state.peerConnection = null;
+        }
+
         state.peerConnection = new RTCPeerConnection(ICE_CONFIG);
         state.localStream.getTracks().forEach(track => state.peerConnection.addTrack(track, state.localStream));
 
         state.peerConnection.ontrack = e => {
+          console.log('[WebRTC] Remote track received');
           document.getElementById('remote-video').srcObject = e.streams[0];
         };
 
         state.peerConnection.onicecandidate = e => {
           if (e.candidate) {
+            console.log('[WebRTC] Sending ICE candidate');
             state.socket.emit('webrtc_signal', { to: state.callTarget, type: 'ice', candidate: e.candidate });
+          }
+        };
+
+        state.peerConnection.onconnectionstatechange = () => {
+          console.log('[WebRTC] Connection state:', state.peerConnection.connectionState);
+          if (state.peerConnection.connectionState === 'disconnected' || state.peerConnection.connectionState === 'failed') {
+            console.warn('[WebRTC] Connection lost');
           }
         };
 
         const offer = await state.peerConnection.createOffer();
         await state.peerConnection.setLocalDescription(offer);
+        console.log('[Call] Sending offer to', state.callTarget);
         state.socket.emit('webrtc_signal', { to: state.callTarget, type: 'offer', sdp: offer, callType: type });
       } catch (err) {
-        console.error('Call error:', err);
+        console.error('[Call Error] startCall:', err);
         let errorMsg = '❌ Call failed:\n\n';
         if (err.name === 'NotAllowedError') {
           errorMsg += 'Permission denied - Please allow camera/microphone access in your browser';
@@ -1526,10 +1539,19 @@
     }
 
     async function handleSignal(data) {
+      console.log('[Signal]', data.type, 'from', data.from);
+
       if (data.type === 'offer') {
         // Incoming call
+        if (state.callState !== 'idle') {
+          console.log('[Call] Already in a call, rejecting');
+          state.socket.emit('webrtc_signal', { to: data.from, type: 'reject' });
+          return;
+        }
+
         const accept = confirm(`📞 Incoming ${data.callType || 'voice'} call from ${data.from}. Accept?`);
         if (!accept) {
+          console.log('[Call] Call rejected by user');
           state.socket.emit('webrtc_signal', { to: data.from, type: 'reject' });
           return;
         }
@@ -1543,9 +1565,10 @@
 
         state.callTarget = data.from;
         state.callType = data.callType;
+        state.callState = 'ringing';
         document.getElementById('call-overlay').classList.add('active');
         document.getElementById('call-name').textContent = data.from;
-        document.getElementById('call-status').textContent = 'Connected';
+        document.getElementById('call-status').textContent = 'Connecting...';
 
         const callAvatar = document.getElementById('call-avatar');
         const user = state.users.find(u => u.username === data.from);
@@ -1557,23 +1580,43 @@
           state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
           if (data.callType === 'video') document.getElementById('local-video').srcObject = state.localStream;
 
+          // Clean up old peer connection if exists
+          if (state.peerConnection) {
+            state.peerConnection.close();
+            state.peerConnection = null;
+          }
+
           state.peerConnection = new RTCPeerConnection(ICE_CONFIG);
           state.localStream.getTracks().forEach(track => state.peerConnection.addTrack(track, state.localStream));
 
           state.peerConnection.ontrack = e => {
+            console.log('[WebRTC] Remote track received');
             document.getElementById('remote-video').srcObject = e.streams[0];
           };
 
           state.peerConnection.onicecandidate = e => {
-            if (e.candidate) state.socket.emit('webrtc_signal', { to: data.from, type: 'ice', candidate: e.candidate });
+            if (e.candidate) {
+              console.log('[WebRTC] Sending ICE candidate');
+              state.socket.emit('webrtc_signal', { to: data.from, type: 'ice', candidate: e.candidate });
+            }
           };
 
+          state.peerConnection.onconnectionstatechange = () => {
+            console.log('[WebRTC] Connection state:', state.peerConnection.connectionState);
+          };
+
+          console.log('[Call] Setting remote description and creating answer');
           await state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
           const answer = await state.peerConnection.createAnswer();
           await state.peerConnection.setLocalDescription(answer);
+
+          state.callState = 'connected';
+          document.getElementById('call-status').textContent = 'Connected';
+
+          console.log('[Call] Sending answer to', data.from);
           state.socket.emit('webrtc_signal', { to: data.from, type: 'answer', sdp: answer });
         } catch (err) {
-          console.error('Incoming call error:', err);
+          console.error('[Call Error] handleSignal offer:', err);
           let errorMsg = '❌ Call failed:\n\n';
           if (err.name === 'NotAllowedError') {
             errorMsg += 'Permission denied - Please allow camera/microphone access';
@@ -1588,31 +1631,95 @@
         }
 
       } else if (data.type === 'answer' && state.peerConnection) {
-        await state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
-        document.getElementById('call-status').textContent = 'Connected';
+        console.log('[Call] Received answer from', data.from);
+        try {
+          await state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          state.callState = 'connected';
+
+          // Clear call timeout
+          if (state.callTimeout) {
+            clearTimeout(state.callTimeout);
+            state.callTimeout = null;
+          }
+
+          document.getElementById('call-status').textContent = 'Connected';
+        } catch (err) {
+          console.error('[WebRTC Error] Setting remote description:', err);
+        }
 
       } else if (data.type === 'ice' && state.peerConnection) {
-        try { await state.peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch { }
+        try {
+          console.log('[WebRTC] Adding ICE candidate');
+          await state.peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (err) {
+          console.error('[WebRTC Error] Adding ICE candidate:', err);
+        }
 
       } else if (data.type === 'reject') {
+        console.log('[Call] Call rejected by', data.from);
         alert(`${data.from} declined the call.`);
         endCall();
 
       } else if (data.type === 'end') {
+        console.log('[Call] Call ended by', data.from);
         endCall();
       }
     }
 
     function endCall() {
-      if (state.peerConnection) { state.peerConnection.close(); state.peerConnection = null; }
-      if (state.localStream) { state.localStream.getTracks().forEach(t => t.stop()); state.localStream = null; }
-      if (state.callTarget) state.socket.emit('webrtc_signal', { to: state.callTarget, type: 'end' });
+      console.log('[Call] Ending call');
+      
+      // Clear call timeout
+      if (state.callTimeout) {
+        clearTimeout(state.callTimeout);
+        state.callTimeout = null;
+      }
+
+      // Close peer connection
+      if (state.peerConnection) {
+        console.log('[WebRTC] Closing peer connection');
+        try {
+          state.peerConnection.close();
+        } catch (err) {
+          console.error('[WebRTC Error] Closing connection:', err);
+        }
+        state.peerConnection = null;
+      }
+
+      // Stop all tracks
+      if (state.localStream) {
+        console.log('[WebRTC] Stopping local stream tracks');
+        state.localStream.getTracks().forEach(t => {
+          try {
+            t.stop();
+          } catch (err) {
+            console.error('[WebRTC Error] Stopping track:', err);
+          }
+        });
+        state.localStream = null;
+      }
+
+      // Notify the other party
+      if (state.callTarget && state.callState !== 'idle') {
+        console.log('[Call] Notifying', state.callTarget, 'that call ended');
+        state.socket.emit('webrtc_signal', { to: state.callTarget, type: 'end' });
+      }
+
+      // Clear UI
       document.getElementById('call-overlay').classList.remove('active');
       document.getElementById('remote-video').srcObject = null;
       document.getElementById('local-video').srcObject = null;
+
+      // Reset state
       state.callTarget = null;
+      state.callType = null;
+      state.callState = 'idle';
       state.muted = false;
       state.camOff = false;
+      
+      // Reset button states
+      document.getElementById('mute-btn').textContent = '🎙️';
+      document.getElementById('cam-btn').textContent = '📷';
     }
 
     function toggleMute() {
