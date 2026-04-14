@@ -662,6 +662,11 @@
       color: white;
     }
 
+    .call-btn.reject {
+      background: #ef4444;
+      color: white;
+    }
+
     .call-btn.mute {
       background: var(--bg-tertiary);
       color: white;
@@ -941,7 +946,15 @@
     <div class="call-avatar" id="call-avatar"></div>
     <div class="call-name" id="call-name"></div>
     <div class="call-status" id="call-status">Calling...</div>
-    <div class="call-buttons">
+
+    <!-- Incoming call action buttons -->
+    <div class="call-buttons" id="call-action-buttons" style="display:none;">
+      <button class="call-btn accept" id="accept-btn" title="Accept call">✅ Accept</button>
+      <button class="call-btn reject" id="reject-btn" title="Reject call">❌ Reject</button>
+    </div>
+
+    <!-- Active call control buttons -->
+    <div class="call-buttons" id="call-control-buttons">
       <button class="call-btn mute" id="mute-btn" onclick="toggleMute()" title="Mute">🎙️</button>
       <button class="call-btn end" onclick="endCall()" title="End call">📵</button>
       <button class="call-btn vid" id="cam-btn" onclick="toggleCam()" title="Camera">📷</button>
@@ -1495,6 +1508,8 @@
       callAvatar.textContent = state.callTarget[0].toUpperCase();
       document.getElementById('call-name').textContent = state.callTarget;
       document.getElementById('call-status').textContent = type === 'voice' ? 'Calling...' : 'Video calling...';
+      document.getElementById('call-action-buttons').style.display = 'none';
+      document.getElementById('call-control-buttons').style.display = 'flex';
 
       // Set timeout for unanswered calls (30 seconds)
       state.callTimeout = setTimeout(() => {
@@ -1590,13 +1605,6 @@
           return;
         }
 
-        const accept = confirm(`📞 Incoming ${data.callType || 'voice'} call from ${data.from}. Accept?`);
-        if (!accept) {
-          console.log('[Call] User rejected call from', data.from);
-          state.socket.emit('webrtc_signal', { to: data.from, type: 'reject' });
-          return;
-        }
-
         // Check browser support
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
           alert('⚠️ Your browser does not support calls.\n\nTry:\n• Chrome, Firefox, Safari, or Edge\n• Access over HTTPS (or localhost)\n• Allow camera/microphone when prompted');
@@ -1609,12 +1617,50 @@
         state.callState = 'ringing';
         document.getElementById('call-overlay').classList.add('active');
         document.getElementById('call-name').textContent = data.from;
-        document.getElementById('call-status').textContent = 'Connecting...';
+        document.getElementById('call-status').textContent = `📞 ${data.callType === 'video' ? 'Video' : 'Voice'} call from ${data.from}...`;
+
+        // Show action buttons, hide control buttons
+        document.getElementById('call-action-buttons').style.display = 'flex';
+        document.getElementById('call-control-buttons').style.display = 'none';
 
         const callAvatar = document.getElementById('call-avatar');
         const user = state.users.find(u => u.username === data.from);
         callAvatar.style.background = user ? user.color : stringToColor(data.from);
         callAvatar.textContent = data.from[0].toUpperCase();
+
+        // Wait for user to click Accept or Reject
+        const userAccepted = await new Promise(resolve => {
+          const acceptBtn = document.getElementById('accept-btn');
+          const rejectBtn = document.getElementById('reject-btn');
+
+          const handleAccept = () => {
+            acceptBtn.removeEventListener('click', handleAccept);
+            rejectBtn.removeEventListener('click', handleReject);
+            resolve(true);
+          };
+
+          const handleReject = () => {
+            acceptBtn.removeEventListener('click', handleAccept);
+            rejectBtn.removeEventListener('click', handleReject);
+            resolve(false);
+          };
+
+          acceptBtn.addEventListener('click', handleAccept);
+          rejectBtn.addEventListener('click', handleReject);
+        });
+
+        if (!userAccepted) {
+          console.log('[Call] User rejected call from', data.from);
+          state.socket.emit('webrtc_signal', { to: data.from, type: 'reject' });
+          endCall();
+          return;
+        }
+
+        // User accepted - proceed with connection setup
+        console.log('[Call] User accepted call from', data.from);
+        document.getElementById('call-status').textContent = 'Connecting...';
+        document.getElementById('call-action-buttons').style.display = 'none';
+        document.getElementById('call-control-buttons').style.display = 'flex';
 
         try {
           console.log('[Call] Accepting call - requesting media');
@@ -1809,6 +1855,8 @@
       document.getElementById('call-overlay').classList.remove('active');
       document.getElementById('remote-video').srcObject = null;
       document.getElementById('local-video').srcObject = null;
+      document.getElementById('call-action-buttons').style.display = 'none';
+      document.getElementById('call-control-buttons').style.display = 'flex';
 
       // Reset state
       state.callTarget = null;
