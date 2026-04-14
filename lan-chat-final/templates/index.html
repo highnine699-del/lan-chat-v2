@@ -1463,6 +1463,8 @@
       state.callType = type;
       state.callState = 'calling';
 
+      console.log('[Call] Starting', type, 'call to', state.callTarget);
+
       const overlay = document.getElementById('call-overlay');
       overlay.classList.add('active');
 
@@ -1476,14 +1478,17 @@
       // Set timeout for unanswered calls (30 seconds)
       state.callTimeout = setTimeout(() => {
         if (state.callState === 'calling') {
-          alert('📞 Call timeout - No answer');
+          console.log('[Call] Call timeout - no answer from', state.callTarget);
+          alert('📞 Call timeout - No answer from ' + state.callTarget);
           endCall();
         }
       }, 30000);
 
       try {
+        console.log('[Call] Requesting', type === 'video' ? 'audio+video' : 'audio', 'media');
         const constraints = type === 'video' ? { audio: true, video: true } : { audio: true, video: false };
         state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.log('[Call] Media obtained successfully');
 
         if (type === 'video') {
           document.getElementById('local-video').srcObject = state.localStream;
@@ -1491,15 +1496,20 @@
 
         // Clean up old peer connection if exists
         if (state.peerConnection) {
+          console.log('[WebRTC] Cleaning up old peer connection');
           state.peerConnection.close();
           state.peerConnection = null;
         }
 
+        console.log('[WebRTC] Creating new peer connection');
         state.peerConnection = new RTCPeerConnection(ICE_CONFIG);
-        state.localStream.getTracks().forEach(track => state.peerConnection.addTrack(track, state.localStream));
+        state.localStream.getTracks().forEach(track => {
+          console.log('[WebRTC] Adding', track.kind, 'track');
+          state.peerConnection.addTrack(track, state.localStream);
+        });
 
         state.peerConnection.ontrack = e => {
-          console.log('[WebRTC] Remote track received');
+          console.log('[WebRTC] Received remote', e.track.kind, 'track');
           document.getElementById('remote-video').srcObject = e.streams[0];
         };
 
@@ -1511,18 +1521,22 @@
         };
 
         state.peerConnection.onconnectionstatechange = () => {
-          console.log('[WebRTC] Connection state:', state.peerConnection.connectionState);
-          if (state.peerConnection.connectionState === 'disconnected' || state.peerConnection.connectionState === 'failed') {
-            console.warn('[WebRTC] Connection lost');
+          console.log('[WebRTC] Connection state:', state.peerConnection?.connectionState);
+          if (state.peerConnection?.connectionState === 'disconnected' || state.peerConnection?.connectionState === 'failed') {
+            console.warn('[WebRTC] Connection failed/disconnected, ending call');
+            endCall();
           }
         };
 
+        console.log('[Call] Creating offer');
         const offer = await state.peerConnection.createOffer();
+        console.log('[Call] Setting local description with offer');
         await state.peerConnection.setLocalDescription(offer);
+
         console.log('[Call] Sending offer to', state.callTarget);
         state.socket.emit('webrtc_signal', { to: state.callTarget, type: 'offer', sdp: offer, callType: type });
       } catch (err) {
-        console.error('[Call Error] startCall:', err);
+        console.error('[Call Error] startCall failed:', err.name, err.message);
         let errorMsg = '❌ Call failed:\n\n';
         if (err.name === 'NotAllowedError') {
           errorMsg += 'Permission denied - Please allow camera/microphone access in your browser';
@@ -1539,19 +1553,25 @@
     }
 
     async function handleSignal(data) {
-      console.log('[Signal]', data.type, 'from', data.from);
+      console.log('[Signal] Received:', {
+        type: data.type,
+        from: data.from,
+        callState: state.callState,
+        callTarget: state.callTarget,
+        hasPeerConnection: !!state.peerConnection
+      });
 
       if (data.type === 'offer') {
         // Incoming call
         if (state.callState !== 'idle') {
-          console.log('[Call] Already in a call, rejecting');
+          console.log('[Call] Already in a call, rejecting incoming');
           state.socket.emit('webrtc_signal', { to: data.from, type: 'reject' });
           return;
         }
 
         const accept = confirm(`📞 Incoming ${data.callType || 'voice'} call from ${data.from}. Accept?`);
         if (!accept) {
-          console.log('[Call] Call rejected by user');
+          console.log('[Call] User rejected call from', data.from);
           state.socket.emit('webrtc_signal', { to: data.from, type: 'reject' });
           return;
         }
@@ -1576,8 +1596,10 @@
         callAvatar.textContent = data.from[0].toUpperCase();
 
         try {
+          console.log('[Call] Accepting call - requesting media');
           const constraints = data.callType === 'video' ? { audio: true, video: true } : { audio: true, video: false };
           state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+          console.log('[Call] Media obtained, creating peer connection');
           if (data.callType === 'video') document.getElementById('local-video').srcObject = state.localStream;
 
           // Clean up old peer connection if exists
@@ -1587,52 +1609,71 @@
           }
 
           state.peerConnection = new RTCPeerConnection(ICE_CONFIG);
-          state.localStream.getTracks().forEach(track => state.peerConnection.addTrack(track, state.localStream));
+          state.localStream.getTracks().forEach(track => {
+            console.log('[WebRTC] Adding track:', track.kind);
+            state.peerConnection.addTrack(track, state.localStream);
+          });
 
           state.peerConnection.ontrack = e => {
-            console.log('[WebRTC] Remote track received');
+            console.log('[WebRTC] Received remote track:', e.track.kind);
             document.getElementById('remote-video').srcObject = e.streams[0];
           };
 
           state.peerConnection.onicecandidate = e => {
             if (e.candidate) {
-              console.log('[WebRTC] Sending ICE candidate');
+              console.log('[WebRTC] ICE candidate generated');
               state.socket.emit('webrtc_signal', { to: data.from, type: 'ice', candidate: e.candidate });
             }
           };
 
           state.peerConnection.onconnectionstatechange = () => {
             console.log('[WebRTC] Connection state:', state.peerConnection.connectionState);
+            if (state.peerConnection?.connectionState === 'disconnected' || state.peerConnection?.connectionState === 'failed') {
+              console.warn('[WebRTC] Connection failed/disconnected');
+              endCall();
+            }
           };
 
-          console.log('[Call] Setting remote description and creating answer');
+          console.log('[Call] Setting remote description from offer');
           await state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+
+          console.log('[Call] Creating answer');
           const answer = await state.peerConnection.createAnswer();
+
+          console.log('[Call] Setting local description with answer');
           await state.peerConnection.setLocalDescription(answer);
 
           state.callState = 'connected';
           document.getElementById('call-status').textContent = 'Connected';
 
-          console.log('[Call] Sending answer to', data.from);
+          console.log('[Call] Sending answer back to', data.from);
           state.socket.emit('webrtc_signal', { to: data.from, type: 'answer', sdp: answer });
         } catch (err) {
-          console.error('[Call Error] handleSignal offer:', err);
+          console.error('[Call Error] Accepting offer:', err.name, err.message);
           let errorMsg = '❌ Call failed:\n\n';
           if (err.name === 'NotAllowedError') {
             errorMsg += 'Permission denied - Please allow camera/microphone access';
           } else if (err.name === 'NotFoundError') {
             errorMsg += 'No camera/microphone found on this device';
+          } else if (err.name === 'InvalidStateError') {
+            errorMsg += 'Call connection error - try again';
           } else {
             errorMsg += err.message || 'Could not accept call';
           }
           alert(errorMsg);
+          console.log('[Call] Sending reject due to error:', err.name);
           state.socket.emit('webrtc_signal', { to: data.from, type: 'reject' });
           endCall();
         }
 
-      } else if (data.type === 'answer' && state.peerConnection) {
+      } else if (data.type === 'answer') {
         console.log('[Call] Received answer from', data.from);
+        if (!state.peerConnection) {
+          console.warn('[Call] Received answer but no peer connection exists');
+          return;
+        }
         try {
+          console.log('[Call] Setting remote description with answer');
           await state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
           state.callState = 'connected';
 
@@ -1642,33 +1683,40 @@
             state.callTimeout = null;
           }
 
-          document.getElementById('call-status').textContent = 'Connected';
+          document.getElementById('call-status').textContent = '✅ Connected';
+          console.log('[Call] Connected!');
         } catch (err) {
-          console.error('[WebRTC Error] Setting remote description:', err);
+          console.error('[WebRTC Error] Setting answer:', err.name, err.message);
         }
 
-      } else if (data.type === 'ice' && state.peerConnection) {
+      } else if (data.type === 'ice') {
+        console.log('[WebRTC] Received ICE candidate');
+        if (!state.peerConnection) {
+          console.warn('[WebRTC] Received ICE but no peer connection');
+          return;
+        }
         try {
-          console.log('[WebRTC] Adding ICE candidate');
           await state.peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
         } catch (err) {
-          console.error('[WebRTC Error] Adding ICE candidate:', err);
+          console.warn('[WebRTC] ICE candidate error (may be normal):', err.message);
         }
 
       } else if (data.type === 'reject') {
         console.log('[Call] Call rejected by', data.from);
-        alert(`${data.from} declined the call.`);
+        alert(`❌ ${data.from} declined the call.`);
         endCall();
 
       } else if (data.type === 'end') {
         console.log('[Call] Call ended by', data.from);
         endCall();
+      } else {
+        console.warn('[Signal] Unknown signal type:', data.type);
       }
     }
 
     function endCall() {
       console.log('[Call] Ending call');
-      
+
       // Clear call timeout
       if (state.callTimeout) {
         clearTimeout(state.callTimeout);
@@ -1716,7 +1764,7 @@
       state.callState = 'idle';
       state.muted = false;
       state.camOff = false;
-      
+
       // Reset button states
       document.getElementById('mute-btn').textContent = '🎙️';
       document.getElementById('cam-btn').textContent = '📷';

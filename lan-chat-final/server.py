@@ -159,9 +159,17 @@ def handle_stop_typing(data):
 @socketio.on('webrtc_signal')
 def handle_signal(data):
     target = data.get('to')
+    sender = users.get(request.sid, {}).get('username', 'Unknown')
+    signal_type = data.get('type', '?')
+    print(f"[WebRTC] {sender} -> {target}: {signal_type}")
+    
     if target in sid_map:
-        data['from'] = users[request.sid]['username']
+        data['from'] = sender
         emit('webrtc_signal', data, to=sid_map[target])
+        print(f"[WebRTC] Forwarded {signal_type} to {target}")
+    else:
+        print(f"[WebRTC] ERROR: Target {target} not found in sid_map")
+        print(f"[WebRTC] Available targets: {list(sid_map.keys())}")
 
 @socketio.on("call-user")
 def handle_call_user():
