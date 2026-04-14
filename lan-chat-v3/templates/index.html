@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>LAN Chat V4</title>
+
+    <!-- Icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #111b21;
+            color: white;
+        }
+
+        .app {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* SIDEBAR */
+        .sidebar {
+            width: 30%;
+            background: #202c33;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: 15px;
+            background: #202c33;
+            border-bottom: 1px solid #2a3942;
+            font-weight: bold;
+        }
+
+        .search {
+            padding: 10px;
+            border-bottom: 1px solid #2a3942;
+        }
+
+        .search input {
+            width: 100%;
+            padding: 8px;
+            border-radius: 20px;
+            border: none;
+            outline: none;
+        }
+
+        .chat-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .chat-item {
+            padding: 15px;
+            border-bottom: 1px solid #2a3942;
+            cursor: pointer;
+        }
+
+        .chat-item:hover {
+            background: #2a3942;
+        }
+
+        .chat-item.active {
+            background: #005c4b;
+        }
+
+        /* CHAT AREA */
+        .chat-area {
+            width: 70%;
+            display: flex;
+            flex-direction: column;
+            background: #0b141a;
+        }
+
+        .chat-header {
+            padding: 15px;
+            background: #202c33;
+            border-bottom: 1px solid #2a3942;
+        }
+
+        #chat {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message {
+            max-width: 60%;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 10px;
+            position: relative;
+        }
+
+        .me {
+            background: #005c4b;
+            margin-left: auto;
+            text-align: right;
+        }
+
+        .other {
+            background: #202c33;
+            margin-right: auto;
+        }
+
+        .time {
+            font-size: 10px;
+            opacity: 0.7;
+            margin-top: 5px;
+            text-align: right;
+        }
+
+        /* INPUT */
+        .chat-input {
+            display: flex;
+            padding: 10px;
+            background: #202c33;
+            gap: 10px;
+        }
+
+        .chat-input input {
+            flex: 1;
+            padding: 10px;
+            border-radius: 20px;
+            border: none;
+            outline: none;
+        }
+
+        .chat-input button {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+        }
+
+        #emojiBox {
+            position: absolute;
+            bottom: 70px;
+            background: #202c33;
+            padding: 10px;
+            border-radius: 10px;
+            z-index: 1000;
+            display: none;
+        }
+
+        #emojiBox div {
+            font-size: 24px;
+            cursor: pointer;
+            display: inline-block;
+            margin: 5px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="app">
+
+        <!-- SIDEBAR -->
+        <div class="sidebar">
+            <div class="sidebar-header">Chats</div>
+
+            <div class="search">
+                <input placeholder="Search..." />
+            </div>
+
+            <div class="chat-list" id="users">
+                <div class="chat-item">General Chat</div>
+            </div>
+        </div>
+
+        <!-- CHAT AREA -->
+        <div class="chat-area">
+
+            <div class="chat-header" id="header">
+                General Chat
+            </div>
+
+            <div id="chat"></div>
+
+            <div class="chat-input">
+                <button onclick="toggleEmoji()"><i class="fa fa-smile"></i></button>
+                <button onclick="document.getElementById('fileInput').click()"><i class="fa fa-paperclip"></i></button>
+
+                <input id="message" placeholder="Type a message..." />
+
+                <button onclick="startRecording()"><i class="fa fa-microphone"></i></button>
+                <button onclick="sendMessage()"><i class="fa fa-paper-plane"></i></button>
+            </div>
+
+            <div id="emojiBox">
+                <div>😀</div>
+                <div>😂</div>
+                <div>😍</div>
+                <div>😎</div>
+                <div>😢</div>
+                <div>👍</div>
+                <div>❤️</div>
+                <div>🔥</div>
+                <div>🎉</div>
+                <div>😡</div>
+            </div>
+        </div>
+
+        <input type="file" id="fileInput" hidden>
+
+
+        <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+
+        <script>
+            const socket = io();
+            let username = prompt("Username:");
+            let currentChat = null;
+
+            let privateKey, publicKey;
+            let keys = {};
+            let chats = {};
+
+            // 🔐 GENERATE RSA KEYS
+            async function generateKeys() {
+                let keyPair = await crypto.subtle.generateKey(
+                    {
+                        name: "RSA-OAEP",
+                        modulusLength: 2048,
+                        publicExponent: new Uint8Array([1, 0, 1]),
+                        hash: "SHA-256"
+                    },
+                    true,
+                    ["encrypt", "decrypt"]
+                );
+
+                privateKey = keyPair.privateKey;
+                publicKey = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
+            }
+
+            async function init() {
+                await generateKeys();
+                socket.emit("join", { username, publicKey });
+            }
+            init();
+
+            // RECEIVE KEYS
+            socket.on("public_keys", data => {
+                keys = data;
+            });
+
+            // USERS
+            socket.on("user_list", users => {
+                const userList = users.filter(u => u !== username);
+                document.getElementById("users").innerHTML =
+                    userList.map(u => `<div class="chat-item" onclick="chat('${u}')">${u}</div>`).join("");
+            });
+
+            function chat(u) {
+                currentChat = u;
+                document.getElementById("chat").innerHTML = "";
+                document.getElementById("header").innerText = u;
+                document.querySelectorAll(".chat-item").forEach(el => el.classList.remove("active"));
+                event.target.classList.add("active");
+            }
+
+            function addMessage(text, isMe = false) {
+                const div = document.createElement("div");
+                div.classList.add("message");
+                div.classList.add(isMe ? "me" : "other");
+
+                const textDiv = document.createElement("div");
+                textDiv.innerText = text;
+
+                const timeDiv = document.createElement("div");
+                timeDiv.classList.add("time");
+                timeDiv.innerText = new Date().toLocaleTimeString();
+
+                div.appendChild(textDiv);
+                div.appendChild(timeDiv);
+
+                document.getElementById("chat").appendChild(div);
+                document.getElementById("chat").scrollTop = document.getElementById("chat").scrollHeight;
+            }
+
+            // SEND ENCRYPTED MESSAGE
+            async function sendMessage() {
+                if (!currentChat) {
+                    alert("Select a user first");
+                    return;
+                }
+
+                let text = document.getElementById("message").value;
+                if (!text) return;
+
+                let pub = keys[currentChat];
+                if (!pub) {
+                    alert("Key not found");
+                    return;
+                }
+
+                let importedKey = await crypto.subtle.importKey(
+                    "jwk",
+                    pub,
+                    { name: "RSA-OAEP", hash: "SHA-256" },
+                    true,
+                    ["encrypt"]
+                );
+
+                let encrypted = await crypto.subtle.encrypt(
+                    { name: "RSA-OAEP" },
+                    importedKey,
+                    new TextEncoder().encode(text)
+                );
+
+                socket.emit("send_message", {
+                    to: currentChat,
+                    from: username,
+                    data: Array.from(new Uint8Array(encrypted))
+                });
+
+                addMessage(text, true);
+
+                document.getElementById("message").value = "";
+            }
+
+            // EMOJI PICKER
+            function toggleEmoji() {
+                const box = document.getElementById("emojiBox");
+                box.style.display = box.style.display === "none" ? "block" : "none";
+            }
+
+            document.getElementById("emojiBox").addEventListener("click", (e) => {
+                if (e.target.innerText) {
+                    document.getElementById("message").value += e.target.innerText;
+                }
+            });
+
+            // FILE UPLOAD
+            document.getElementById("fileInput").addEventListener("change", async function () {
+                const file = this.files[0];
+                if (!file) return;
+
+                const formData = new FormData();
+                formData.append("file", file);
+
+                const res = await fetch("/upload", {
+                    method: "POST",
+                    body: formData
+                });
+
+                const data = await res.json();
+                socket.emit("file", data.url);
+                this.value = "";
+            });
+
+            // VOICE RECORDING
+            let mediaRecorder;
+            let audioChunks = [];
+
+            async function startRecording() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+                    mediaRecorder.start();
+                    audioChunks = [];
+
+                    mediaRecorder.ondataavailable = e => {
+                        audioChunks.push(e.data);
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        const blob = new Blob(audioChunks, { type: "audio/webm" });
+                        const formData = new FormData();
+                        formData.append("file", blob, "voice.webm");
+
+                        const res = await fetch("/upload", {
+                            method: "POST",
+                            body: formData
+                        });
+
+                        const data = await res.json();
+                        socket.emit("file", data.url);
+                    };
+
+                    setTimeout(() => mediaRecorder.stop(), 5000);
+                } catch (err) {
+                    console.log("Mic access denied", err);
+                }
+            }
+
+            // FILE BROADCAST
+            socket.on("file", (url) => {
+                const div = document.createElement("div");
+                div.classList.add("message", "other");
+
+                if (url.match(/\.(jpg|png|jpeg|gif)$/)) {
+                    div.innerHTML = `<img src="${url}" width="200" style="border-radius:10px;">`;
+                } else if (url.endsWith(".webm")) {
+                    div.innerHTML = `<audio controls style="width:200px;" src="${url}"></audio>`;
+                } else {
+                    div.innerHTML = `<a href="${url}" target="_blank" style="color:#25d366;">📁 Download</a>`;
+                }
+
+                document.getElementById("chat").appendChild(div);
+                document.getElementById("chat").scrollTop = document.getElementById("chat").scrollHeight;
+            });
+
+            // RECEIVE MESSAGE
+            socket.on("new_message", async msg => {
+                if (msg.to !== username && msg.from !== username) return;
+
+                try {
+                    let decrypted = await crypto.subtle.decrypt(
+                        { name: "RSA-OAEP" },
+                        privateKey,
+                        new Uint8Array(msg.data)
+                    );
+
+                    let text = new TextDecoder().decode(decrypted);
+
+                    if (!chats[msg.from]) chats[msg.from] = [];
+                    chats[msg.from].push(text);
+
+                    addMessage(text, false);
+
+                } catch (e) {
+                    console.log("decrypt fail", e);
+                }
+            });
+
+            document.getElementById("message").addEventListener("keypress", (e) => {
+                if (e.key === "Enter") sendMessage();
+            });
+        </script>
+
+</body>
+
+</html>

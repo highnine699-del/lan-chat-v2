@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>LAN Chat v2</title>
+    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            font-family: sans-serif;
+        }
+
+        .sidebar {
+            width: 30%;
+            background: #111b21;
+            color: white;
+            padding: 10px;
+        }
+
+        .chat {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #0b141a;
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .bubble {
+            max-width: 60%;
+            padding: 8px;
+            margin: 5px;
+            border-radius: 10px;
+        }
+
+        .me {
+            background: #005c4b;
+            margin-left: auto;
+            color: white;
+        }
+
+        .other {
+            background: #202c33;
+            color: white;
+        }
+
+        .input {
+            display: flex;
+        }
+
+        input {
+            flex: 1;
+            padding: 10px;
+        }
+
+        button {
+            padding: 10px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="sidebar">
+        <h3>Chats</h3>
+        <div onclick="setChat('global')">🌍 Global</div>
+        <ul id="users"></ul>
+    </div>
+
+    <div class="chat">
+        <div id="messages" class="messages"></div>
+
+        <div class="input">
+            <input id="msg">
+            <button onclick="send()">Send</button>
+            <input type="file" onchange="uploadFile(this)">
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let username = prompt("Username:");
+        let currentChat = "global";
+        let key;
+
+        let chats = {}; // store per chat
+
+        // 🔐 generate encryption key
+        async function initCrypto() {
+            key = await crypto.subtle.generateKey(
+                { name: "AES-GCM", length: 256 },
+                true,
+                ["encrypt", "decrypt"]
+            );
+        }
+        initCrypto();
+
+        socket.emit("join", { username });
+
+        // USERS
+        socket.on("user_list", users => {
+            document.getElementById("users").innerHTML =
+                users.filter(u => u !== username)
+                    .map(u => `<li onclick="setChat('${u}')">${u}</li>`).join("");
+        });
+
+        // SWITCH CHAT
+        function setChat(user) {
+            currentChat = user;
+            renderMessages();
+        }
+
+        // SEND MESSAGE
+        async function send() {
+            let text = document.getElementById("msg").value;
+
+            let enc = new TextEncoder();
+            let iv = crypto.getRandomValues(new Uint8Array(12));
+
+            let encrypted = await crypto.subtle.encrypt(
+                { name: "AES-GCM", iv },
+                key,
+                enc.encode(text)
+            );
+
+            socket.emit("send_message", {
+                to: currentChat,
+                data: Array.from(new Uint8Array(encrypted)),
+                iv: Array.from(iv)
+            });
+
+            document.getElementById("msg").value = "";
+        }
+
+        // RECEIVE MESSAGE
+        socket.on("new_message", async msg => {
+            let dec = new TextDecoder();
+
+            try {
+                let decrypted = await crypto.subtle.decrypt(
+                    { name: "AES-GCM", iv: new Uint8Array(msg.iv) },
+                    key,
+                    new Uint8Array(msg.data)
+                );
+
+                let text = dec.decode(decrypted);
+
+                let chatKey = msg.from === username ? currentChat : msg.from;
+
+                if (!chats[chatKey]) chats[chatKey] = [];
+                chats[chatKey].push({ user: msg.from, text });
+
+                renderMessages();
+
+            } catch (e) {
+                console.log("Decrypt failed");
+            }
+        });
+
+        // RENDER
+        function renderMessages() {
+            let container = document.getElementById("messages");
+            container.innerHTML = "";
+
+            let msgs = chats[currentChat] || [];
+
+            msgs.forEach(m => {
+                let div = document.createElement("div");
+                div.className = "bubble " + (m.user === username ? "me" : "other");
+                div.innerText = m.text;
+                container.appendChild(div);
+            });
+        }
+
+        // FILE UPLOAD
+        function uploadFile(input) {
+            let file = input.files[0];
+            let reader = new FileReader();
+
+            reader.onload = () => {
+                socket.emit("upload", {
+                    name: file.name,
+                    file: reader.result,
+                    type: file.type
+                });
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+
+        socket.on("file", f => {
+            let html;
+
+            if (f.type.startsWith("image")) {
+                html = `<img src="${f.url}" width="150">`;
+            } else if (f.type.startsWith("audio")) {
+                html = `<audio controls src="${f.url}"></audio>`;
+            } else {
+                html = `<a href="${f.url}" target="_blank">Download</a>`;
+            }
+
+            if (!chats["global"]) chats["global"] = [];
+            chats["global"].push({ user: f.user, text: html });
+            renderMessages();
+        });
+    </script>
+
+</body>
+
+</html>
+
+</html>
