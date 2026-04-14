@@ -960,10 +960,10 @@
       username: '',
       currentChat: 'global',
       users: [],
-      chatMessages: { global: [] },  // chat id -> messages
+      chatMessages: { global: [] },
       typingTimers: {},
-      typingUsers: {},               // chat -> Set of usernames
-      unread: {},                    // chat -> count
+      typingUsers: {},
+      unread: {},
       mediaRecorder: null,
       audioChunks: [],
       recordTimer: null,
@@ -974,10 +974,10 @@
       callType: null,
       muted: false,
       camOff: false,
-      callState: 'idle',             // idle, calling, ringing, connected, ended
-      callTimeout: null,             // timeout for unanswered calls
-      switchChat('global');
-    }
+      callState: 'idle',
+      callTimeout: null,
+      iceCandidateBuffer: [],  // Buffer ICE candidates until connection ready
+    };
 
     document.getElementById('username-input').addEventListener('keydown', e => {
       if (e.key === 'Enter') document.getElementById('password-input').focus();
@@ -1462,6 +1462,7 @@
       state.callTarget = state.currentChat;
       state.callType = type;
       state.callState = 'calling';
+      state.iceCandidateBuffer = [];  // Clear buffer for new call
 
       console.log('[Call] Starting', type, 'call to', state.callTarget);
 
@@ -1637,6 +1638,19 @@
           console.log('[Call] Setting remote description from offer');
           await state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
 
+          // Flush buffered ICE candidates
+          if (state.iceCandidateBuffer.length > 0) {
+            console.log('[WebRTC] Flushing', state.iceCandidateBuffer.length, 'buffered ICE candidates');
+            for (const candidate of state.iceCandidateBuffer) {
+              try {
+                await state.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+              } catch (err) {
+                console.warn('[WebRTC] Error adding buffered ICE:', err.message);
+              }
+            }
+            state.iceCandidateBuffer = [];
+          }
+
           console.log('[Call] Creating answer');
           const answer = await state.peerConnection.createAnswer();
 
@@ -1677,6 +1691,19 @@
           await state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
           state.callState = 'connected';
 
+          // Flush buffered ICE candidates
+          if (state.iceCandidateBuffer.length > 0) {
+            console.log('[WebRTC] Flushing', state.iceCandidateBuffer.length, 'buffered ICE candidates');
+            for (const candidate of state.iceCandidateBuffer) {
+              try {
+                await state.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+              } catch (err) {
+                console.warn('[WebRTC] Error adding buffered ICE:', err.message);
+              }
+            }
+            state.iceCandidateBuffer = [];
+          }
+
           // Clear call timeout
           if (state.callTimeout) {
             clearTimeout(state.callTimeout);
@@ -1692,11 +1719,13 @@
       } else if (data.type === 'ice') {
         console.log('[WebRTC] Received ICE candidate');
         if (!state.peerConnection) {
-          console.warn('[WebRTC] Received ICE but no peer connection');
+          console.warn('[WebRTC] Buffering ICE - no peer connection yet');
+          state.iceCandidateBuffer.push(data.candidate);
           return;
         }
         try {
           await state.peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+          console.log('[WebRTC] ICE candidate added successfully');
         } catch (err) {
           console.warn('[WebRTC] ICE candidate error (may be normal):', err.message);
         }
@@ -1716,6 +1745,9 @@
 
     function endCall() {
       console.log('[Call] Ending call');
+
+      // Clear ICE candidate buffer
+      state.iceCandidateBuffer = [];
 
       // Clear call timeout
       if (state.callTimeout) {
