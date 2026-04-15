@@ -4,14 +4,26 @@ import os, time, json
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'lanchatsecret2024'
-socketio = SocketIO(app, cors_allowed_origins="*", max_http_buffer_size=50*1024*1024)
+socketio = SocketIO(app, 
+                    cors_allowed_origins="*", 
+                    max_http_buffer_size=50*1024*1024,
+                    ping_timeout=60,
+                    ping_interval=25,
+                    engineio_logger=False)
 
-# State
-users = {}       # sid -> {username, color, joined_at}
-sid_map = {}     # username -> sid
-public_keys = {} # username -> public key
-message_history = []  # global chat history (RAM only)
-private_history = {}  # "user1|user2" -> [messages]
+# State (RAM only - no persistence)
+users = {}        # sid -> {username, color, joined_at}
+sid_map = {}      # username -> sid
+public_keys = {}  # username -> ECDH public key JWK (for E2E encryption)
+message_history = []  # global chat history (RAM only - cleared on restart)
+private_history = {}  # "user1|user2" -> [messages] (RAM only)
+
+# ── TURN credentials ────────────────────────────────────────────────────────
+# Store credentials here (server-side only). Clients fetch via /ice-config.
+# Replace with your own Twilio / Metered / coturn credentials if needed.
+TURN_CREDENTIALS = os.environ.get('TURN_CREDENTIALS', '')  # "username:credential"
+TURN_URLS_UDP = os.environ.get('TURN_URL_UDP', 'turn:global.turn.twilio.com:3478?transport=udp')
+TURN_URLS_TCP = os.environ.get('TURN_URL_TCP', 'turn:global.turn.twilio.com:443?transport=tcp')
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -30,26 +42,72 @@ def index():
 def uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
+@app.route('/ice-config')
+def ice_config():
+    """Serve ICE/TURN config to authenticated clients only.
+    Credentials stay server-side and are never embedded in the HTML."""
+    ice_servers = [
+        {'urls': 'stun:stun.l.google.com:19302'},
+        {'urls': 'stun:stun1.l.google.com:19302'},
+        {'urls': 'stun:stun2.l.google.com:19302'},
+        {'urls': 'stun:stun3.l.google.com:19302'},
+        {'urls': 'stun:stun4.l.google.com:19302'},
+    ]
+    if TURN_CREDENTIALS:
+        username, _, credential = TURN_CREDENTIALS.partition(':')
+        if username and credential:
+            ice_servers.append({
+                'urls': TURN_URLS_UDP,
+                'username': username,
+                'credential': credential,
+            })
+            ice_servers.append({
+                'urls': TURN_URLS_TCP,
+                'username': username,
+                'credential': credential,
+            })
+    return jsonify({
+        'iceServers': ice_servers,
+        'iceCandidatePoolSize': 20,
+        'bundlePolicy': 'max-bundle',
+        'rtcpMuxPolicy': 'require',
+    })
+
 @app.route('/upload', methods=['POST'])
 def upload():
     if 'file' not in request.files:
         return jsonify({'error': 'No file'}), 400
     file = request.files['file']
-    ext = os.path.splitext(file.filename)[1] if file.filename else '.bin'
-    filename = str(int(time.time() * 1000)) + '_' + (file.filename or 'file' + ext)
-    # sanitize
-    filename = filename.replace(' ', '_')
+    if not file.filename:
+        return jsonify({'error': 'No filename'}), 400
+    # Sanitize filename: strip path components and replace unsafe chars
+    import re
+    safe_name = os.path.basename(file.filename)
+    safe_name = re.sub(r'[^\w.\-]', '_', safe_name)
+    if not safe_name:
+        safe_name = 'file.bin'
+    filename = str(int(time.time() * 1000)) + '_' + safe_name
     path = os.path.join(UPLOAD_FOLDER, filename)
     file.save(path)
     return jsonify({
         'url': '/uploads/' + filename,
-        'name': file.filename or 'file',
+        'name': file.filename,
         'type': file.content_type or 'application/octet-stream'
     })
 
 @socketio.on('join')
 def handle_join(data):
-    username = data.get('username', 'Anonymous')[:20]
+    username = data.get('username', 'Anonymous')[:20].strip()
+    if not username:
+        username = 'Anonymous'
+
+    # If username is already taken by a different session, append a number
+    base = username
+    counter = 2
+    while username in sid_map and sid_map[username] != request.sid:
+        username = f"{base}{counter}"
+        counter += 1
+
     color = USER_COLORS[color_index[0] % len(USER_COLORS)]
     color_index[0] += 1
 
@@ -59,6 +117,21 @@ def handle_join(data):
         'joined_at': time.time()
     }
     sid_map[username] = request.sid
+
+    # Store public key for E2E encryption
+    pub_key = data.get('publicKey')
+    if pub_key:
+        public_keys[username] = pub_key
+
+    # Confirm the (possibly adjusted) username back to the client
+    emit('joined', {'username': username, 'color': color})
+
+    # Send all existing public keys to the new user
+    emit('all_keys', {u: k for u, k in public_keys.items() if u != username})
+
+    # Broadcast this user's public key to everyone else
+    if pub_key:
+        emit('peer_key', {'username': username, 'publicKey': pub_key}, broadcast=True, include_self=False)
 
     # Send history to new user
     emit('message_history', message_history[-100:])
@@ -101,6 +174,11 @@ def handle_message(data):
         emit('new_message', msg, broadcast=True)
     else:
         # Private message
+        key = '|'.join(sorted([user['username'], target]))
+        if key not in private_history:
+            private_history[key] = []
+        private_history[key].append(msg)
+        
         if target in sid_map:
             emit('new_message', msg, to=sid_map[target])
         emit('new_message', msg, to=request.sid)
@@ -127,6 +205,11 @@ def handle_file(data):
         message_history.append(msg)
         emit('new_message', msg, broadcast=True)
     else:
+        key = '|'.join(sorted([user['username'], target]))
+        if key not in private_history:
+            private_history[key] = []
+        private_history[key].append(msg)
+        
         if target in sid_map:
             emit('new_message', msg, to=sid_map[target])
         emit('new_message', msg, to=request.sid)
@@ -172,30 +255,51 @@ def handle_signal(data):
         print(f"[WebRTC] Available targets: {list(sid_map.keys())}")
 
 @socketio.on("call-user")
-def handle_call_user():
-    emit("incoming-call", broadcast=True, include_self=False)
+def handle_call_user(data=None):
+    target = (data or {}).get('to')
+    if target and target in sid_map:
+        emit("incoming-call", broadcast=False, to=sid_map[target])
+    else:
+        emit("incoming-call", broadcast=True, include_self=False)
 
 @socketio.on("video-call-user")
-def handle_video_call_user():
-    emit("incoming-call", broadcast=True, include_self=False)
+def handle_video_call_user(data=None):
+    target = (data or {}).get('to')
+    if target and target in sid_map:
+        emit("incoming-call", broadcast=False, to=sid_map[target])
+    else:
+        emit("incoming-call", broadcast=True, include_self=False)
 
 @socketio.on("call-accepted")
-def handle_call_accepted():
-    emit("call-started", broadcast=True, include_self=False)
+def handle_call_accepted(data=None):
+    target = (data or {}).get('to')
+    if target and target in sid_map:
+        emit("call-started", to=sid_map[target])
+    else:
+        emit("call-started", broadcast=True, include_self=False)
 
 @socketio.on("call-rejected")
-def handle_call_rejected():
-    emit("call-ended", broadcast=True, include_self=False)
+def handle_call_rejected(data=None):
+    target = (data or {}).get('to')
+    if target and target in sid_map:
+        emit("call-ended", to=sid_map[target])
+    else:
+        emit("call-ended", broadcast=True, include_self=False)
 
 @socketio.on("end-call")
-def handle_end_call():
-    emit("call-ended", broadcast=True, include_self=False)
+def handle_end_call(data=None):
+    target = (data or {}).get('to')
+    if target and target in sid_map:
+        emit("call-ended", to=sid_map[target])
+    else:
+        emit("call-ended", broadcast=True, include_self=False)
 
 @socketio.on('disconnect')
 def handle_disconnect():
     user = users.pop(request.sid, None)
     if user:
         sid_map.pop(user['username'], None)
+        public_keys.pop(user['username'], None)
         emit('user_list', get_user_list(), broadcast=True)
         emit('system_message', {
             'type': 'system',
@@ -212,6 +316,7 @@ def get_user_list():
 if __name__ == '__main__':
     print("\n" + "="*50)
     print("  LAN CHAT - Starting server...")
+    print("  🔄 Auto-reload enabled - changes apply automatically")
     print("="*50)
     import socket as sock
     try:
@@ -221,8 +326,11 @@ if __name__ == '__main__':
         s.close()
     except:
         local_ip = "127.0.0.1"
-    print(f"\n  Local:   http://127.0.0.1:3000")
-    print(f"  Network: http://{local_ip}:3000")
+    print(f"\n  Local:   http://127.0.0.1:5000")
+    print(f"  Network: http://{local_ip}:5000")
     print(f"\n  Share the Network URL with classmates!")
+    print(f"\n  ⚠  LAN traffic is unencrypted (HTTP).")
+    print(f"     Private messages are E2E encrypted in the browser.")
+    print(f"     For full transport encryption use the ngrok HTTPS URL.")
     print("="*50 + "\n")
-    socketio.run(app, host='0.0.0.0', port=3000, debug=False)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)

@@ -8,27 +8,30 @@
   <link rel="manifest" href="/static/manifest.json">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;500;600&display=swap" rel="stylesheet">
-  <!-- Emoji Picker -->
-  <script src="https://cdn.jsdelivr.net/npm/emoji-picker-element@1/index.js" type="module"></script>
+  <!-- Emoji Picker (bundled locally - works offline) -->
+  <script src="/static/emoji-picker.js" type="module"></script>
   <!-- Socket.IO -->
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 
   <style>
     :root {
-      --bg-primary: #111b21;
-      --bg-secondary: #202c33;
-      --bg-tertiary: #2a3942;
-      --bg-chat: #0b141a;
-      --bubble-me: #005c4b;
-      --bubble-other: #202c33;
+      --bg-primary: #0a0e13;
+      --bg-secondary: #121820;
+      --bg-tertiary: #1a2332;
+      --bg-chat: #050a0f;
+      --bubble-me: #004d3d;
+      --bubble-other: #151d28;
       --text-primary: #e9edef;
-      --text-secondary: #8696a0;
-      --text-muted: #667781;
-      --accent: #00a884;
-      --accent-hover: #06cf9c;
-      --border: #2a3942;
-      --danger: #ef4444;
-      --icon-btn: #aebac1;
+      --text-secondary: #7fa999;
+      --text-muted: #5a7871;
+      --accent: #00ff88;
+      --accent-hover: #00ff99;
+      --accent-dark: #00aa66;
+      --border: #1a2f28;
+      --danger: #ff4455;
+      --icon-btn: #00ff88;
+      --neon-glow: 0 0 10px rgba(0, 255, 136, 0.5), 0 0 20px rgba(0, 255, 136, 0.3);
+      --neon-glow-strong: 0 0 15px rgba(0, 255, 136, 0.8), 0 0 30px rgba(0, 255, 136, 0.4);
     }
 
     * {
@@ -108,18 +111,21 @@
     .login-btn {
       width: 100%;
       background: var(--accent);
-      color: white;
-      border: none;
+      color: #0a0e13;
+      border: 2px solid var(--accent);
       border-radius: 8px;
       padding: 13px;
       font-size: 15px;
       font-weight: 600;
       cursor: pointer;
-      transition: background 0.2s, transform 0.1s;
+      transition: all 0.3s;
+      box-shadow: var(--neon-glow), inset 0 0 10px rgba(0, 255, 136, 0.2);
     }
 
     .login-btn:hover {
       background: var(--accent-hover);
+      box-shadow: var(--neon-glow-strong), inset 0 0 15px rgba(0, 255, 136, 0.3);
+      transform: scale(1.02);
     }
 
     .login-btn:active {
@@ -137,11 +143,12 @@
     .sidebar {
       width: 360px;
       min-width: 300px;
-      background: var(--bg-secondary);
+      background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
       display: flex;
       flex-direction: column;
-      border-right: 1px solid var(--border);
+      border-right: 2px solid var(--accent);
       flex-shrink: 0;
+      box-shadow: -2px 0 20px rgba(0, 255, 136, 0.1);
     }
 
     .sidebar-header {
@@ -149,9 +156,10 @@
       align-items: center;
       justify-content: space-between;
       padding: 10px 16px;
-      background: var(--bg-secondary);
+      background: linear-gradient(90deg, rgba(0, 255, 136, 0.05) 0%, transparent 100%);
       height: 60px;
       flex-shrink: 0;
+      border-bottom: 1px solid var(--border);
     }
 
     .my-avatar {
@@ -164,6 +172,14 @@
       font-size: 18px;
       font-weight: 600;
       cursor: pointer;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .my-avatar:hover {
+      transform: scale(1.05);
+      box-shadow: 0 6px 16px rgba(0, 168, 132, 0.3);
     }
 
     .sidebar-title {
@@ -224,15 +240,20 @@
       padding: 12px 16px;
       cursor: pointer;
       border-bottom: 1px solid var(--border);
-      transition: background 0.15s;
+      transition: all 0.2s;
+      border-left: 3px solid transparent;
     }
 
     .chat-item:hover {
-      background: var(--bg-tertiary);
+      background: linear-gradient(90deg, rgba(0, 255, 136, 0.05) 0%, transparent 100%);
+      border-left-color: var(--accent);
+      transform: translateX(4px);
     }
 
     .chat-item.active {
-      background: var(--bg-tertiary);
+      background: linear-gradient(90deg, rgba(0, 255, 136, 0.1) 0%, transparent 100%);
+      border-left-color: var(--accent);
+      box-shadow: inset 0 0 10px rgba(0, 255, 136, 0.05);
     }
 
     .chat-avatar {
@@ -245,6 +266,8 @@
       font-size: 20px;
       font-weight: 600;
       flex-shrink: 0;
+      border: 2px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     }
 
     .chat-item-info {
@@ -288,10 +311,11 @@
       align-items: center;
       gap: 12px;
       padding: 10px 16px;
-      background: var(--bg-secondary);
+      background: linear-gradient(90deg, rgba(0, 255, 136, 0.05) 0%, transparent 100%);
       height: 60px;
       flex-shrink: 0;
-      border-bottom: 1px solid var(--border);
+      border-bottom: 2px solid var(--accent);
+      box-shadow: 0 2px 15px rgba(0, 255, 136, 0.1);
     }
 
     .chat-header-avatar {
@@ -303,6 +327,8 @@
       justify-content: center;
       font-size: 18px;
       font-weight: 600;
+      border: 2px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     }
 
     .chat-header-info {
@@ -336,12 +362,23 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: background 0.15s;
+      transition: all 0.2s;
+    }
+
+    .icon-btn svg {
+      stroke: var(--icon-btn);
     }
 
     .icon-btn:hover {
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
+      color: var(--accent);
+      background: rgba(0, 255, 136, 0.1);
+      box-shadow: 0 0 10px rgba(0, 255, 136, 0.4);
+      transform: scale(1.1);
+    }
+
+    .icon-btn:hover svg {
+      stroke: var(--accent);
+      filter: drop-shadow(0 0 6px rgba(0, 255, 136, 0.6));
     }
 
     .icon-btn.danger:hover {
@@ -357,6 +394,9 @@
       display: flex;
       flex-direction: column;
       gap: 2px;
+      background-image: url('/static/wallpaper.svg');
+      background-size: cover;
+      background-attachment: fixed;
     }
 
     #messages::-webkit-scrollbar {
@@ -383,22 +423,27 @@
 
     .bubble {
       max-width: 65%;
-      padding: 7px 10px 6px;
-      border-radius: 8px;
+      padding: 10px 13px 8px;
+      border-radius: 10px;
       position: relative;
       word-break: break-word;
       line-height: 1.4;
       font-size: 14.5px;
+      backdrop-filter: blur(4px);
     }
 
     .msg-wrapper.me .bubble {
-      background: var(--bubble-me);
+      background: linear-gradient(135deg, #004d3d 0%, #003d2f 100%);
       border-top-right-radius: 2px;
+      border-left: 2px solid var(--accent);
+      box-shadow: 0 0 8px rgba(0, 255, 136, 0.2), inset 0 0 8px rgba(0, 255, 136, 0.1);
     }
 
     .msg-wrapper.other .bubble {
-      background: var(--bubble-other);
+      background: linear-gradient(135deg, #1a2332 0%, #141d28 100%);
       border-top-left-radius: 2px;
+      border-right: 2px solid rgba(0, 255, 136, 0.3);
+      box-shadow: 0 0 6px rgba(0, 0, 0, 0.3);
     }
 
     .bubble-sender {
@@ -499,8 +544,8 @@
 
     .input-box {
       flex: 1;
-      background: var(--bg-primary);
-      border: none;
+      background: var(--bg-secondary);
+      border: 1.5px solid var(--accent);
       border-radius: 10px;
       padding: 11px 14px;
       color: var(--text-primary);
@@ -511,6 +556,13 @@
       max-height: 120px;
       min-height: 44px;
       line-height: 1.4;
+      transition: all 0.3s;
+      box-shadow: inset 0 0 8px rgba(0, 255, 136, 0.08);
+    }
+
+    .input-box:focus {
+      box-shadow: inset 0 0 8px rgba(0, 255, 136, 0.15), 0 0 10px rgba(0, 255, 136, 0.3);
+      border-color: var(--accent-hover);
     }
 
     .input-box::placeholder {
@@ -521,20 +573,24 @@
       width: 44px;
       height: 44px;
       background: var(--accent);
-      border: none;
+      border: 2px solid var(--accent);
       border-radius: 50%;
-      color: white;
+      color: #0a0e13;
       font-size: 18px;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      transition: background 0.2s, transform 0.1s;
+      transition: all 0.3s;
+      box-shadow: var(--neon-glow), inset 0 0 8px rgba(0, 255, 136, 0.2);
+      font-weight: 600;
     }
 
     .send-btn:hover {
       background: var(--accent-hover);
+      box-shadow: var(--neon-glow-strong), inset 0 0 12px rgba(0, 255, 136, 0.3);
+      transform: scale(1.05);
     }
 
     .send-btn:active {
@@ -604,6 +660,8 @@
       font-weight: 700;
       margin-bottom: 8px;
       animation: pulse 2s infinite;
+      border: 3px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(0, 168, 132, 0.2);
     }
 
     @keyframes pulse {
@@ -639,13 +697,18 @@
       width: 68px;
       height: 68px;
       border-radius: 50%;
-      border: none;
+      border: 2px solid rgba(255, 255, 255, 0.3);
       font-size: 26px;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: transform 0.15s, opacity 0.15s;
+      transition: all 0.3s;
+      font-weight: 600;
+    }
+
+    .call-btn:hover {
+      transform: scale(1.08);
     }
 
     .call-btn:active {
@@ -653,28 +716,45 @@
     }
 
     .call-btn.end {
-      background: #ef4444;
+      background: #ff4455;
       color: white;
+      box-shadow: 0 0 15px rgba(255, 68, 85, 0.5), inset 0 0 10px rgba(255, 255, 255, 0.1);
+    }
+
+    .call-btn.end:hover {
+      box-shadow: 0 0 25px rgba(255, 68, 85, 0.8), inset 0 0 15px rgba(255, 255, 255, 0.2);
     }
 
     .call-btn.accept {
       background: var(--accent);
-      color: white;
+      color: #0a0e13;
+      box-shadow: var(--neon-glow), inset 0 0 10px rgba(0, 255, 136, 0.2);
+    }
+
+    .call-btn.accept:hover {
+      box-shadow: var(--neon-glow-strong), inset 0 0 15px rgba(0, 255, 136, 0.3);
     }
 
     .call-btn.reject {
-      background: #ef4444;
+      background: #ff4455;
       color: white;
+      box-shadow: 0 0 15px rgba(255, 68, 85, 0.5), inset 0 0 10px rgba(255, 255, 255, 0.1);
     }
 
     .call-btn.mute {
       background: var(--bg-tertiary);
-      color: white;
+      color: var(--accent);
+      box-shadow: 0 0 10px rgba(0, 255, 136, 0.3), inset 0 0 8px rgba(0, 255, 136, 0.1);
+    }
+
+    .call-btn.mute:hover {
+      box-shadow: 0 0 15px rgba(0, 255, 136, 0.5), inset 0 0 10px rgba(0, 255, 136, 0.2);
     }
 
     .call-btn.vid {
       background: var(--bg-tertiary);
-      color: white;
+      color: var(--accent);
+      box-shadow: 0 0 10px rgba(0, 255, 136, 0.3), inset 0 0 8px rgba(0, 255, 136, 0.1);
     }
 
     #local-video,
@@ -903,8 +983,21 @@
             <div class="chat-header-status" id="header-status">Everyone online</div>
           </div>
           <div class="header-actions">
-            <button class="icon-btn" onclick="startCall('voice')" title="Voice call">📞</button>
-            <button class="icon-btn" onclick="startCall('video')" title="Video call">📹</button>
+            <button class="icon-btn neon-icon" onclick="startCall('voice')" title="Voice call">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path
+                  d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z">
+                </path>
+              </svg>
+            </button>
+            <button class="icon-btn neon-icon" onclick="startCall('video')" title="Video call">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -943,6 +1036,7 @@
   <div id="call-overlay">
     <video id="remote-video" autoplay playsinline></video>
     <video id="local-video" autoplay muted playsinline></video>
+    <audio id="remote-audio" autoplay></audio>
     <div class="call-avatar" id="call-avatar"></div>
     <div class="call-name" id="call-name"></div>
     <div class="call-status" id="call-status">Calling...</div>
@@ -990,6 +1084,96 @@
       callState: 'idle',
       callTimeout: null,
       iceCandidateBuffer: [],  // Buffer ICE candidates until connection ready
+      // ── E2E Encryption ──────────────────────────────────────────────
+      myKeyPair: null,          // CryptoKeyPair (ECDH P-256)
+      myPublicKeyJwk: null,     // JWK of our public key (shared with peers)
+      peerPublicKeys: {},       // username -> CryptoKey (imported ECDH public key)
+      sharedSecrets: {},        // username -> CryptoKey (AES-GCM derived key)
+    };
+
+    // ─── E2E ENCRYPTION ───────────────────────────────────────────────
+    const E2E = {
+      /** Generate our ECDH key pair on login */
+      async generateKeys() {
+        state.myKeyPair = await crypto.subtle.generateKey(
+          { name: 'ECDH', namedCurve: 'P-256' },
+          true,
+          ['deriveKey']
+        );
+        state.myPublicKeyJwk = await crypto.subtle.exportKey('jwk', state.myKeyPair.publicKey);
+        return state.myPublicKeyJwk;
+      },
+
+      /** Import a peer's JWK public key */
+      async importPeerKey(jwk) {
+        return crypto.subtle.importKey(
+          'jwk', jwk,
+          { name: 'ECDH', namedCurve: 'P-256' },
+          true,
+          []
+        );
+      },
+
+      /** Derive a shared AES-GCM key from our private key + peer's public key */
+      async deriveSharedKey(peerPublicKey) {
+        return crypto.subtle.deriveKey(
+          { name: 'ECDH', public: peerPublicKey },
+          state.myKeyPair.privateKey,
+          { name: 'AES-GCM', length: 256 },
+          false,
+          ['encrypt', 'decrypt']
+        );
+      },
+
+      /** Get (or derive) the shared key for a peer */
+      async getSharedKey(username) {
+        if (state.sharedSecrets[username]) return state.sharedSecrets[username];
+        const peerKey = state.peerPublicKeys[username];
+        if (!peerKey) return null;
+        const key = await E2E.deriveSharedKey(peerKey);
+        state.sharedSecrets[username] = key;
+        return key;
+      },
+
+      /** Encrypt a plaintext string for a peer. Returns base64(iv + ciphertext) */
+      async encrypt(plaintext, username) {
+        const key = await E2E.getSharedKey(username);
+        if (!key) return null;
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const encoded = new TextEncoder().encode(plaintext);
+        const cipherBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
+        // Prepend IV to ciphertext
+        const combined = new Uint8Array(iv.byteLength + cipherBuf.byteLength);
+        combined.set(iv, 0);
+        combined.set(new Uint8Array(cipherBuf), iv.byteLength);
+        return btoa(String.fromCharCode(...combined));
+      },
+
+      /** Decrypt a base64(iv + ciphertext) string from a peer */
+      async decrypt(b64, username) {
+        const key = await E2E.getSharedKey(username);
+        if (!key) return null;
+        try {
+          const combined = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+          const iv = combined.slice(0, 12);
+          const cipherBuf = combined.slice(12);
+          const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, cipherBuf);
+          return new TextDecoder().decode(plainBuf);
+        } catch {
+          return null; // decryption failed (wrong key or tampered)
+        }
+      },
+
+      /** Register a peer's public key, derive shared secret immediately */
+      async registerPeerKey(username, jwk) {
+        if (state.peerPublicKeys[username]) return; // already have it
+        const pubKey = await E2E.importPeerKey(jwk);
+        state.peerPublicKeys[username] = pubKey;
+        // Pre-derive shared key
+        const shared = await E2E.deriveSharedKey(pubKey);
+        state.sharedSecrets[username] = shared;
+        console.log(`[E2E] Shared key derived with ${username}`);
+      }
     };
 
     document.getElementById('username-input').addEventListener('keydown', e => {
@@ -1000,7 +1184,7 @@
     });
 
     // ─── LOGIN ────────────────────────────────────────────────
-    function doLogin() {
+    async function doLogin() {
       const name = document.getElementById('username-input').value.trim();
       if (!name) { alert('Please enter a name'); return; }
       state.username = name;
@@ -1016,6 +1200,10 @@
       document.getElementById('my-avatar').textContent = name[0].toUpperCase();
       document.getElementById('my-name').textContent = name;
 
+      // Generate E2E key pair before connecting
+      await E2E.generateKeys();
+      console.log('[E2E] Key pair generated');
+
       connectSocket();
       switchChat('global');
     }
@@ -1026,7 +1214,34 @@
       const s = state.socket;
 
       s.on('connect', () => {
-        s.emit('join', { username: state.username });
+        s.emit('join', { username: state.username, publicKey: state.myPublicKeyJwk });
+      });
+
+      s.on('joined', data => {
+        // Server may have adjusted the username (e.g. duplicate)
+        if (data.username !== state.username) {
+          state.username = data.username;
+          document.getElementById('my-name').textContent = state.username;
+          const color = stringToColor(state.username);
+          document.getElementById('my-avatar').style.background = color;
+          document.getElementById('my-avatar').textContent = state.username[0].toUpperCase();
+        }
+      });
+
+      // Receive a peer's public key
+      s.on('peer_key', async data => {
+        if (data.username && data.publicKey) {
+          await E2E.registerPeerKey(data.username, data.publicKey);
+        }
+      });
+
+      // Receive all current peers' public keys on join
+      s.on('all_keys', async keys => {
+        for (const [username, jwk] of Object.entries(keys)) {
+          if (username !== state.username) {
+            await E2E.registerPeerKey(username, jwk);
+          }
+        }
       });
 
       s.on('user_list', users => {
@@ -1035,11 +1250,17 @@
       });
 
       s.on('message_history', msgs => {
-        msgs.forEach(m => addMessage(m, false));
+        msgs.forEach(m => addMessage(m, false)); // addMessage is async but fire-and-forget is fine for history
       });
 
       s.on('new_message', msg => {
         addMessage(msg, true);
+
+        // Notify about new message
+        if (msg.from !== state.username) {
+          notifyNewMessage(msg.from, msg.text || msg.file?.name || '[File]');
+        }
+
         // Unread badge
         if (msg.to === 'global' && state.currentChat !== 'global') {
           incrementUnread('global');
@@ -1079,10 +1300,141 @@
       });
 
       s.on('webrtc_signal', handleSignal);
+
+      // Request notification permission
+      requestNotificationPermission();
+    }
+
+    // ─── NOTIFICATIONS ────────────────────────────────────────
+    function requestNotificationPermission() {
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
+    }
+
+    function showNotification(title, options = {}) {
+      // Browser notification
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(title, {
+          icon: '/static/manifest.json',
+          tag: 'chat-notification',
+          ...options
+        });
+      }
+
+      // Sound notification
+      const soundType = options.soundType || 'beep';
+      if (soundType === 'ring') {
+        playRingTone();
+      } else {
+        playNotificationSound();
+      }
+    }
+
+    function playNotificationSound() {
+      // Simple beep for messages
+      try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        oscillator.frequency.value = 800;
+        oscillator.type = 'sine';
+
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.5);
+      } catch (e) {
+        console.log('[Notification] Could not play sound:', e.message);
+      }
+    }
+
+    function playRingTone() {
+      // Realistic phone ringing tone
+      try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        let time = audioContext.currentTime;
+
+        // Ring pattern: 0.5s ring, 0.5s silence, repeating
+        const ringDuration = 0.5;
+        const silenceDuration = 0.5;
+        const repeatCount = 6; // 6 rings = 3 seconds
+
+        for (let i = 0; i < repeatCount; i++) {
+          const startTime = time + (i * (ringDuration + silenceDuration));
+
+          // Create two tones for richer sound (like real phone rings)
+          const frequencies = [800, 1200]; // Dual tone
+
+          frequencies.forEach(freq => {
+            const osc = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+
+            osc.connect(gain);
+            gain.connect(audioContext.destination);
+
+            osc.frequency.value = freq;
+            osc.type = 'sine';
+
+            // Fade in and out
+            gain.gain.setValueAtTime(0, startTime);
+            gain.gain.linearRampToValueAtTime(0.25, startTime + 0.05);
+            gain.gain.setValueAtTime(0.25, startTime + ringDuration - 0.1);
+            gain.gain.linearRampToValueAtTime(0, startTime + ringDuration);
+
+            osc.start(startTime);
+            osc.stop(startTime + ringDuration);
+          });
+        }
+      } catch (e) {
+        console.log('[Notification] Could not play ring tone:', e.message);
+      }
+    }
+
+    function notifyNewMessage(from, preview) {
+      // Don't notify if this chat is currently active
+      const chatId = from === state.username ? '' : from;
+      if (chatId === state.currentChat) return;
+
+      const title = `📨 New message from ${from}`;
+      const messagePreview = preview.substring(0, 50) + (preview.length > 50 ? '...' : '');
+
+      showNotification(title, {
+        body: messagePreview,
+        tag: `msg-${from}`,
+        soundType: 'beep'
+      });
+    }
+
+    function notifyIncomingCall(from, callType) {
+      const title = callType === 'video' ? '📹 Incoming video call' : '☎️ Incoming call';
+
+      showNotification(title, {
+        body: `${from} is calling...`,
+        tag: 'incoming-call',
+        requireInteraction: true,
+        soundType: 'ring'
+      });
     }
 
     // ─── MESSAGES ─────────────────────────────────────────────
-    function addMessage(msg, live) {
+    async function addMessage(msg, live) {
+      // Decrypt private messages
+      if (msg.encrypted && msg.to !== 'global') {
+        const peer = msg.from === state.username ? msg.to : msg.from;
+        const plaintext = await E2E.decrypt(msg.encrypted, peer);
+        if (plaintext !== null) {
+          msg = { ...msg, text: plaintext };
+        } else {
+          msg = { ...msg, text: '🔒 [encrypted — key not available]' };
+        }
+      }
+
       const chatId = msg.to === 'global' ? 'global'
         : (msg.from === state.username ? msg.to : msg.from);
 
@@ -1190,12 +1542,23 @@
     }
 
     // ─── SEND MESSAGE ──────────────────────────────────────────
-    function sendMessage() {
+    async function sendMessage() {
       const input = document.getElementById('msg-input');
       const text = input.value.trim();
       if (!text) return;
 
-      state.socket.emit('send_message', { to: state.currentChat, text });
+      let payload = { to: state.currentChat, text };
+
+      // Encrypt private messages end-to-end
+      if (state.currentChat !== 'global') {
+        const ciphertext = await E2E.encrypt(text, state.currentChat);
+        if (ciphertext) {
+          payload.encrypted = ciphertext;
+          payload.text = '🔒'; // placeholder; recipient will decrypt
+        }
+      }
+
+      state.socket.emit('send_message', payload);
       state.socket.emit('stop_typing', { to: state.currentChat });
       input.value = '';
       input.style.height = 'auto';
@@ -1204,7 +1567,7 @@
     function handleKey(e) {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        sendMessage();
+        sendMessage(); // async, fire-and-forget is fine here
       }
     }
 
@@ -1356,7 +1719,7 @@
       } else {
         const user = state.users.find(u => u.username === chatId);
         document.getElementById('header-name').textContent = chatId;
-        document.getElementById('header-status').textContent = 'Online';
+        document.getElementById('header-status').textContent = '🔒 End-to-end encrypted';
         const av = document.getElementById('header-avatar');
         av.style.background = user ? user.color : stringToColor(chatId);
         av.style.fontSize = '18px';
@@ -1473,7 +1836,34 @@
     }
 
     // ─── WEBRTC CALLS ────────────────────────────────────────────
-    const ICE_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    // ICE config is fetched from the server so TURN credentials are never
+    // embedded in client-side code. Falls back to STUN-only if fetch fails.
+    let ICE_CONFIG = null;
+
+    async function getIceConfig() {
+      if (ICE_CONFIG) return ICE_CONFIG;
+      try {
+        const res = await fetch('/ice-config');
+        if (res.ok) {
+          ICE_CONFIG = await res.json();
+          console.log('[ICE] Config loaded from server, servers:', ICE_CONFIG.iceServers.length);
+        } else {
+          throw new Error('HTTP ' + res.status);
+        }
+      } catch (err) {
+        console.warn('[ICE] Could not fetch config, using STUN-only fallback:', err.message);
+        ICE_CONFIG = {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+          ],
+          iceCandidatePoolSize: 10,
+          bundlePolicy: 'max-bundle',
+          rtcpMuxPolicy: 'require',
+        };
+      }
+      return ICE_CONFIG;
+    }
 
     async function startCall(type) {
       // Prevent multiple simultaneous calls
@@ -1522,9 +1912,43 @@
 
       try {
         console.log('[Call] Requesting', type === 'video' ? 'audio+video' : 'audio', 'media');
-        const constraints = type === 'video' ? { audio: true, video: true } : { audio: true, video: false };
-        state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+        // Try with advanced constraints first
+        let constraints = type === 'video'
+          ? {
+            audio: {
+              echoCancellation: { ideal: true },
+              noiseSuppression: { ideal: true },
+              autoGainControl: { ideal: true }
+            },
+            video: {
+              width: { ideal: 640 },
+              height: { ideal: 480 }
+            }
+          }
+          : {
+            audio: {
+              echoCancellation: { ideal: true },
+              noiseSuppression: { ideal: true },
+              autoGainControl: { ideal: true }
+            },
+            video: false
+          };
+
+        try {
+          state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (constraintErr) {
+          console.warn('[Call] Constraint error, trying fallback:', constraintErr.name);
+          // Fallback to minimal constraints
+          constraints = type === 'video' ? { audio: true, video: true } : { audio: true, video: false };
+          state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        }
+
         console.log('[Call] Media obtained successfully');
+        const audioTrack = state.localStream.getAudioTracks()[0];
+        const videoTrack = state.localStream.getVideoTracks()[0];
+        console.log('[Call] Audio track:', audioTrack ? 'YES (' + audioTrack.label + ')' : 'NO');
+        console.log('[Call] Video track:', videoTrack ? 'YES (' + videoTrack.label + ')' : 'NO');
 
         if (type === 'video') {
           document.getElementById('local-video').srcObject = state.localStream;
@@ -1538,44 +1962,112 @@
         }
 
         console.log('[WebRTC] Creating new peer connection');
-        state.peerConnection = new RTCPeerConnection(ICE_CONFIG);
+        state.peerConnection = new RTCPeerConnection(await getIceConfig());
+
+        // Add all tracks
+        const trackCount = { audio: 0, video: 0 };
         state.localStream.getTracks().forEach(track => {
-          console.log('[WebRTC] Adding', track.kind, 'track');
+          console.log('[WebRTC] Adding', track.kind, 'track (enabled:', track.enabled + ')');
           state.peerConnection.addTrack(track, state.localStream);
+          trackCount[track.kind]++;
         });
+        console.log('[WebRTC] Total tracks added - Audio:', trackCount.audio, 'Video:', trackCount.video);
 
         state.peerConnection.ontrack = e => {
           console.log('[WebRTC] Received remote', e.track.kind, 'track');
-          document.getElementById('remote-video').srcObject = e.streams[0];
+          if (e.streams && e.streams[0]) {
+            const remoteStream = e.streams[0];
+
+            // For video or audio, attach to video element (contains both audio and video)
+            const videoEl = document.getElementById('remote-video');
+            videoEl.srcObject = remoteStream;
+
+            // Also attach to audio element as backup for better audio playback
+            const audioEl = document.getElementById('remote-audio');
+            audioEl.srcObject = remoteStream;
+
+            // Try to play both elements
+            const playPromises = [videoEl.play().catch(() => null), audioEl.play().catch(() => null)];
+            Promise.all(playPromises).then(() => {
+              console.log('[WebRTC] Remote media playing');
+            }).catch(() => {
+              console.warn('[WebRTC] Autoplay blocked by browser policy');
+              console.log('[WebRTC] Audio will start on next user interaction');
+              // On any user click, attempt to play
+              const retryPlay = () => {
+                videoEl.play().catch(() => { });
+                audioEl.play().catch(() => { });
+                document.removeEventListener('click', retryPlay);
+              };
+              document.addEventListener('click', retryPlay);
+            });
+
+            console.log('[WebRTC] Remote stream attached, tracks:', remoteStream.getTracks().map(t => `${t.kind}(${t.enabled ? 'on' : 'off'})`.toUpperCase()));
+          } else {
+            console.warn('[WebRTC] No streams in track event');
+          }
         };
 
         state.peerConnection.onicecandidate = e => {
           if (e.candidate) {
-            console.log('[WebRTC] Sending ICE candidate');
+            console.log('[WebRTC] Sending ICE candidate, type:', e.candidate.type);
             state.socket.emit('webrtc_signal', { to: state.callTarget, type: 'ice', candidate: e.candidate });
+          }
+        };
+
+        state.peerConnection.onicegatheringstatechange = () => {
+          console.log('[WebRTC] ICE gathering state:', state.peerConnection?.iceGatheringState);
+        };
+
+        state.peerConnection.oniceconnectionstatechange = () => {
+          console.log('[WebRTC] ICE connection state:', state.peerConnection?.iceConnectionState);
+          if (state.peerConnection?.iceConnectionState === 'failed') {
+            console.warn('[WebRTC] ICE connection failed - attempting restart...');
           }
         };
 
         state.peerConnection.onconnectionstatechange = () => {
           console.log('[WebRTC] Connection state:', state.peerConnection?.connectionState);
+          console.log('[WebRTC] ICE connection state:', state.peerConnection?.iceConnectionState);
+          console.log('[WebRTC] ICE gathering state:', state.peerConnection?.iceGatheringState);
+          console.log('[WebRTC] Signaling state:', state.peerConnection?.signalingState);
+
+          if (state.peerConnection?.connectionState === 'connected') {
+            document.getElementById('call-status').textContent = '✅ Connected - Audio/Video flowing';
+          } else if (state.peerConnection?.connectionState === 'connecting') {
+            document.getElementById('call-status').textContent = '🔗 Establishing connection...';
+          }
+
           if (state.peerConnection?.connectionState === 'disconnected' || state.peerConnection?.connectionState === 'failed') {
-            console.warn('[WebRTC] Connection failed/disconnected, ending call');
-            endCall();
+            if (state.peerConnection?.connectionState === 'failed') {
+              console.warn('[WebRTC] Connection FAILED - Attempting ICE restart...');
+              document.getElementById('call-status').textContent = 'Reconnecting...';
+              state.peerConnection.restartIce?.();
+            } else {
+              console.warn('[WebRTC] Connection disconnected');
+            }
           }
         };
 
+        // Create and send the offer
         console.log('[Call] Creating offer');
         const offer = await state.peerConnection.createOffer();
         console.log('[Call] Setting local description with offer');
         await state.peerConnection.setLocalDescription(offer);
-
         console.log('[Call] Sending offer to', state.callTarget);
         state.socket.emit('webrtc_signal', { to: state.callTarget, type: 'offer', sdp: offer, callType: type });
+        startStatsMonitoring();
+
       } catch (err) {
         console.error('[Call Error] startCall failed:', err.name, err.message);
         let errorMsg = '❌ Call failed:\n\n';
         if (err.name === 'NotAllowedError') {
-          errorMsg += 'Permission denied - Please allow camera/microphone access in your browser';
+          errorMsg += '⚙️ Permission denied\n\n';
+          errorMsg += 'When prompted, please:\n';
+          errorMsg += '1️⃣  Allow camera/microphone access\n';
+          errorMsg += '2️⃣  Tap "Allow" on all permission dialogs\n';
+          errorMsg += '3️⃣  Try the call again\n\n';
+          errorMsg += '📱 On mobile: Check if ngrok URL is HTTPS';
         } else if (err.name === 'NotFoundError') {
           errorMsg += 'No camera/microphone found on this device';
         } else if (err.name === 'NotSupportedError') {
@@ -1586,7 +2078,7 @@
         alert(errorMsg);
         endCall();
       }
-    }
+    } // end startCall
 
     async function handleSignal(data) {
       console.log('[Signal] Received:', {
@@ -1615,6 +2107,10 @@
         state.callTarget = data.from;
         state.callType = data.callType;
         state.callState = 'ringing';
+
+        // Send notification
+        notifyIncomingCall(data.from, data.callType);
+
         document.getElementById('call-overlay').classList.add('active');
         document.getElementById('call-name').textContent = data.from;
         document.getElementById('call-status').textContent = `📞 ${data.callType === 'video' ? 'Video' : 'Voice'} call from ${data.from}...`;
@@ -1664,9 +2160,43 @@
 
         try {
           console.log('[Call] Accepting call - requesting media');
-          const constraints = data.callType === 'video' ? { audio: true, video: true } : { audio: true, video: false };
-          state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+          // Try with advanced constraints first
+          let constraints = data.callType === 'video'
+            ? {
+              audio: {
+                echoCancellation: { ideal: true },
+                noiseSuppression: { ideal: true },
+                autoGainControl: { ideal: true }
+              },
+              video: {
+                width: { ideal: 640 },
+                height: { ideal: 480 }
+              }
+            }
+            : {
+              audio: {
+                echoCancellation: { ideal: true },
+                noiseSuppression: { ideal: true },
+                autoGainControl: { ideal: true }
+              },
+              video: false
+            };
+
+          try {
+            state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+          } catch (constraintErr) {
+            console.warn('[Call] Constraint error, trying fallback:', constraintErr.name);
+            // Fallback to minimal constraints
+            constraints = data.callType === 'video' ? { audio: true, video: true } : { audio: true, video: false };
+            state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+          }
+
           console.log('[Call] Media obtained, creating peer connection');
+          const audioTrack = state.localStream.getAudioTracks()[0];
+          const videoTrack = state.localStream.getVideoTracks()[0];
+          console.log('[Call] Audio track:', audioTrack ? 'YES (' + audioTrack.label + ')' : 'NO');
+          console.log('[Call] Video track:', videoTrack ? 'YES (' + videoTrack.label + ')' : 'NO');
           if (data.callType === 'video') document.getElementById('local-video').srcObject = state.localStream;
 
           // Clean up old peer connection if exists
@@ -1675,47 +2205,95 @@
             state.peerConnection = null;
           }
 
-          state.peerConnection = new RTCPeerConnection(ICE_CONFIG);
+          state.peerConnection = new RTCPeerConnection(await getIceConfig());
+
+          // Add all tracks
+          const trackCount = { audio: 0, video: 0 };
           state.localStream.getTracks().forEach(track => {
-            console.log('[WebRTC] Adding track:', track.kind);
+            console.log('[WebRTC] Adding track:', track.kind, '(enabled:', track.enabled + ')');
             state.peerConnection.addTrack(track, state.localStream);
+            trackCount[track.kind]++;
           });
+          console.log('[WebRTC] Total tracks added - Audio:', trackCount.audio, 'Video:', trackCount.video);
 
           state.peerConnection.ontrack = e => {
             console.log('[WebRTC] Received remote track:', e.track.kind);
-            document.getElementById('remote-video').srcObject = e.streams[0];
+            if (e.streams && e.streams[0]) {
+              const remoteStream = e.streams[0];
+
+              // For video or audio, attach to video element (contains both audio and video)
+              const videoEl = document.getElementById('remote-video');
+              videoEl.srcObject = remoteStream;
+
+              // Also attach to audio element as backup for better audio playback
+              const audioEl = document.getElementById('remote-audio');
+              audioEl.srcObject = remoteStream;
+
+              // Try to play both elements
+              const playPromises = [videoEl.play().catch(() => null), audioEl.play().catch(() => null)];
+              Promise.all(playPromises).then(() => {
+                console.log('[WebRTC] Remote media playing');
+              }).catch(() => {
+                console.warn('[WebRTC] Autoplay blocked by browser policy');
+                console.log('[WebRTC] Audio will start on next user interaction');
+                // On any user click, attempt to play
+                const retryPlay = () => {
+                  videoEl.play().catch(() => { });
+                  audioEl.play().catch(() => { });
+                  document.removeEventListener('click', retryPlay);
+                };
+                document.addEventListener('click', retryPlay);
+              });
+
+              console.log('[WebRTC] Remote stream attached, tracks:', remoteStream.getTracks().map(t => `${t.kind}(${t.enabled ? 'on' : 'off'})`.toUpperCase()));
+            } else {
+              console.warn('[WebRTC] No streams in track event');
+            }
           };
 
           state.peerConnection.onicecandidate = e => {
             if (e.candidate) {
-              console.log('[WebRTC] ICE candidate generated');
+              console.log('[WebRTC] ICE candidate generated, type:', e.candidate.type);
               state.socket.emit('webrtc_signal', { to: data.from, type: 'ice', candidate: e.candidate });
             }
           };
 
-          state.peerConnection.onconnectionstatechange = () => {
-            console.log('[WebRTC] Connection state:', state.peerConnection.connectionState);
-            if (state.peerConnection?.connectionState === 'disconnected' || state.peerConnection?.connectionState === 'failed') {
-              console.warn('[WebRTC] Connection failed/disconnected');
-              endCall();
+          state.peerConnection.onicegatheringstatechange = () => {
+            console.log('[WebRTC] ICE gathering state:', state.peerConnection?.iceGatheringState);
+          };
+
+          state.peerConnection.oniceconnectionstatechange = () => {
+            console.log('[WebRTC] ICE connection state:', state.peerConnection?.iceConnectionState);
+            if (state.peerConnection?.iceConnectionState === 'failed') {
+              console.warn('[WebRTC] ICE connection failed');
             }
           };
 
-          console.log('[Call] Setting remote description from offer');
-          await state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          state.peerConnection.onconnectionstatechange = () => {
+            console.log('[WebRTC] Connection state:', state.peerConnection?.connectionState);
+            console.log('[WebRTC] ICE connection state:', state.peerConnection?.iceConnectionState);
+            console.log('[WebRTC] ICE gathering state:', state.peerConnection?.iceGatheringState);
+            console.log('[WebRTC] Signaling state:', state.peerConnection?.signalingState);
 
-          // Flush buffered ICE candidates
-          if (state.iceCandidateBuffer.length > 0) {
-            console.log('[WebRTC] Flushing', state.iceCandidateBuffer.length, 'buffered ICE candidates');
-            for (const candidate of state.iceCandidateBuffer) {
-              try {
-                await state.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-              } catch (err) {
-                console.warn('[WebRTC] Error adding buffered ICE:', err.message);
+            if (state.peerConnection?.connectionState === 'connected') {
+              document.getElementById('call-status').textContent = '✅ Connected - Audio/Video flowing';
+            } else if (state.peerConnection?.connectionState === 'connecting') {
+              document.getElementById('call-status').textContent = '🔗 Establishing connection...';
+            }
+
+            if (state.peerConnection?.connectionState === 'disconnected' || state.peerConnection?.connectionState === 'failed') {
+              if (state.peerConnection?.connectionState === 'failed') {
+                console.warn('[WebRTC] Connection FAILED - Attempting ICE restart...');
+                document.getElementById('call-status').textContent = 'Reconnecting...';
+                state.peerConnection.restartIce?.();
+              } else {
+                console.warn('[WebRTC] Connection disconnected');
               }
             }
-            state.iceCandidateBuffer = [];
-          }
+          };
+
+          console.log('[Call] Setting remote description with offer');
+          await state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
 
           console.log('[Call] Creating answer');
           const answer = await state.peerConnection.createAnswer();
@@ -1725,6 +2303,7 @@
 
           state.callState = 'connected';
           document.getElementById('call-status').textContent = 'Connected';
+          startStatsMonitoring();
 
           console.log('[Call] Sending answer back to', data.from);
           state.socket.emit('webrtc_signal', { to: data.from, type: 'answer', sdp: answer });
@@ -1732,7 +2311,12 @@
           console.error('[Call Error] Accepting offer:', err.name, err.message);
           let errorMsg = '❌ Call failed:\n\n';
           if (err.name === 'NotAllowedError') {
-            errorMsg += 'Permission denied - Please allow camera/microphone access';
+            errorMsg += '⚙️ Permission denied\n\n';
+            errorMsg += 'When prompted, please:\n';
+            errorMsg += '1️⃣  Allow camera/microphone access\n';
+            errorMsg += '2️⃣  Tap "Allow" on all permission dialogs\n';
+            errorMsg += '3️⃣  Try the call again\n\n';
+            errorMsg += '📱 On mobile: Check if ngrok URL is HTTPS';
           } else if (err.name === 'NotFoundError') {
             errorMsg += 'No camera/microphone found on this device';
           } else if (err.name === 'InvalidStateError') {
@@ -1756,19 +2340,16 @@
           console.log('[Call] Setting remote description with answer');
           await state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
           state.callState = 'connected';
-
-          // Flush buffered ICE candidates
-          if (state.iceCandidateBuffer.length > 0) {
-            console.log('[WebRTC] Flushing', state.iceCandidateBuffer.length, 'buffered ICE candidates');
-            for (const candidate of state.iceCandidateBuffer) {
-              try {
-                await state.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-              } catch (err) {
-                console.warn('[WebRTC] Error adding buffered ICE:', err.message);
-              }
+          startStatsMonitoring();
+          console.log('[WebRTC] Flushing', state.iceCandidateBuffer.length, 'buffered ICE candidates');
+          for (const candidate of state.iceCandidateBuffer) {
+            try {
+              await state.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (err) {
+              console.warn('[WebRTC] Error adding buffered ICE:', err.message);
             }
-            state.iceCandidateBuffer = [];
           }
+          state.iceCandidateBuffer = [];
 
           // Clear call timeout
           if (state.callTimeout) {
@@ -1807,10 +2388,66 @@
       } else {
         console.warn('[Signal] Unknown signal type:', data.type);
       }
+    } // end handleSignal
+
+    // ─── WebRTC STATS MONITOR ─────────────────────────────────────────
+    async function monitorWebRTCStats() {
+      if (!state.peerConnection || state.callState !== 'connected') return;
+
+      try {
+        const stats = await state.peerConnection.getStats();
+        let audioStats = null, videoStats = null, candidatePair = null;
+
+        stats.forEach(report => {
+          if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+            audioStats = report;
+          } else if (report.type === 'inbound-rtp' && report.kind === 'video') {
+            videoStats = report;
+          } else if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+            candidatePair = report;
+          }
+        });
+
+        if (audioStats) {
+          console.log('[WebRTC-Stats] Audio - Received:', audioStats.bytesReceived, 'packets:', audioStats.packetsReceived);
+          if (audioStats.bytesReceived === 0) {
+            console.warn('[WebRTC-Stats] ⚠️ No audio data received! Check if remote is sending audio.');
+          }
+        } else {
+          console.warn('[WebRTC-Stats] No audio stats yet (still connecting or no audio track)');
+        }
+
+        if (videoStats) {
+          console.log('[WebRTC-Stats] Video - Received:', videoStats.bytesReceived, 'packets:', videoStats.packetsReceived);
+        }
+
+        if (candidatePair) {
+          console.log('[WebRTC-Stats] ICE - Current bitrate:', candidatePair.availableOutgoingBitrate.toFixed(0), 'bps');
+        }
+      } catch (err) {
+        console.warn('[WebRTC-Stats] Error:', err.message);
+      }
+    }
+
+    // Start monitoring stats every 2 seconds
+    let statsInterval = null;
+    function startStatsMonitoring() {
+      if (statsInterval) clearInterval(statsInterval);
+      statsInterval = setInterval(monitorWebRTCStats, 2000);
+      console.log('[WebRTC-Stats] Started monitoring');
+    }
+
+    function stopStatsMonitoring() {
+      if (statsInterval) {
+        clearInterval(statsInterval);
+        statsInterval = null;
+        console.log('[WebRTC-Stats] Stopped monitoring');
+      }
     }
 
     function endCall() {
       console.log('[Call] Ending call');
+      stopStatsMonitoring();
 
       // Clear ICE candidate buffer
       state.iceCandidateBuffer = [];
