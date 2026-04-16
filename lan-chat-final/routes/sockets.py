@@ -1,0 +1,812 @@
+"""
+routes/sockets.py — All Socket.IO event handlers.
+
+Prefixed event naming convention
+---------------------------------
+room:create       Create a new room
+room:join         Join an existing room
+room:leave        Leave current room
+room:list         Get list of public rooms
+user:presence     Update own presence state
+user:switch_persona  Switch to a different persona
+admin:kick        Kick a user from a room (room admin only)
+admin:freeze      Freeze / unfreeze a room (room admin only)
+admin:mod         Grant / revoke mod status (room admin only)
+message:send      (legacy: send_message)
+message:send_file (legacy: send_file)
+"""
+import json
+import os
+import time
+import secrets as _sec
+
+from flask import request
+from flask_socketio import emit, join_room, leave_room
+
+from config import (
+    MAX_MESSAGE_LEN, MAX_SIGNAL_BYTES, UPLOAD_FOLDER,
+    HIDE_VOTE_THRESHOLD, SPAM_COOLDOWN_S,
+    MAX_ROOM_NAME_LEN, EPHEMERAL_TTLS,
+)
+from state import (
+    # core state
+    users, sid_map, public_keys,
+    message_history, private_history,
+    rooms, user_state, shadow_muted,
+    message_votes, spam_tracker, analytics,
+    # helpers
+    get_user_list, next_color, unique_username,
+    private_key, append_private, now_ms, clean_username,
+    generate_tag, reputation_label,
+    init_user_state, set_presence,
+    create_room, get_room, is_room_admin,
+    room_member_list, schedule_room_delete, cancel_room_delete,
+    check_smart_spam, cooldown_remaining,
+    filter_expired, clean_room_name,
+)
+
+
+def register_socket_handlers(socketio):
+    """Bind all Socket.IO event handlers to *socketio*."""
+
+    # ── Module-level helpers ──────────────────────────────────────────────────
+
+    def current_sid() -> str | None:
+        return getattr(request, 'sid', None)
+
+    def current_user() -> dict | None:
+        sid = current_sid()
+        return users.get(sid) if sid else None
+
+    def system_msg(text: str) -> dict:
+        return {'type': 'system', 'text': text, 'time': now_ms()}
+
+    def relay_to_target(event: str, payload: dict, target: str | None) -> None:
+        """Emit to a named peer only if they are online."""
+        if target and target in sid_map:
+            emit(event, payload, to=sid_map[target])
+
+    def dispatch_message(msg: dict, target: str) -> None:
+        """
+        Route a message to the correct destination:
+          'global'       → global history + broadcast
+          room_id        → room history + room broadcast
+          display string → private history + both parties
+        """
+        # Stamp internal timestamp for TTL filtering
+        msg['_ts'] = time.time()
+
+        if target == 'global':
+            message_history.append(msg)
+            emit('new_message', msg, broadcast=True)
+
+        elif target in rooms:
+            room = rooms[target]
+            if room['is_frozen']:
+                emit('error', {'message': 'This room is frozen. No messages allowed.'})
+                return
+            room['messages'].append(msg)
+            emit('new_message', msg, to=target)   # Socket.IO room broadcast
+
+        else:
+            # Private DM
+            key = private_key(msg['from'], target)
+            append_private(key, msg)
+            if target in sid_map:
+                emit('new_message', msg, to=sid_map[target])
+            sid = current_sid()
+            if sid:
+                emit('new_message', msg, to=sid)
+
+    # ── join ─────────────────────────────────────────────────────────────────
+
+    @socketio.on('join')
+    def handle_join(data):
+        """Register a new user. Cleans up stale sessions on reconnect."""
+        if not isinstance(data, dict):
+            return
+
+        sid = current_sid()
+        if not sid:
+            return
+
+        # Clean up stale session
+        stale = users.pop(sid, None)
+        if stale:
+            sid_map.pop(stale['display'], None)
+            public_keys.pop(stale['display'], None)
+            user_state.pop(sid, None)
+            emit('user_list', get_user_list(), broadcast=True)
+
+        uid = str(data.get('uid', ''))[:64] or _sec.token_hex(16)
+        tag = generate_tag(uid)
+
+        username = unique_username(clean_username(data.get('username', '')), sid)
+        display  = f'{username}#{tag}'
+        color    = next_color()
+
+        users[sid] = {
+            'username':  username,
+            'tag':       tag,
+            'display':   display,
+            'uid':       uid,
+            'color':     color,
+            'joined_at': time.time(),
+            'msg_count': 0,
+            'room_id':   None,
+            'presence':  'active',
+            'persona':   None,
+        }
+        sid_map[display] = sid
+        init_user_state(sid, username, tag, color)
+
+        pub_key = data.get('publicKey')
+        if isinstance(pub_key, dict):
+            public_keys[display] = pub_key
+
+        # Update peak users analytics
+        if len(users) > analytics['peak_users']:
+            analytics['peak_users'] = len(users)
+
+        emit('joined', {
+            'username':   username,
+            'tag':        tag,
+            'display':    display,
+            'color':      color,
+            'uid':        uid,
+            'reputation': reputation_label(0),
+        })
+
+        other_keys = dict(public_keys)
+        other_keys.pop(display, None)
+        emit('all_keys', other_keys)
+        emit('message_history', list(message_history)[-100:])
+
+        if pub_key:
+            emit('peer_key', {'username': display, 'publicKey': pub_key},
+                 broadcast=True, include_self=False)
+
+        emit('user_list', get_user_list(), broadcast=True)
+        emit('system_message', system_msg(f'{display} joined'), broadcast=True)
+
+    # ── send_message (legacy + room-aware) ───────────────────────────────────
+
+    @socketio.on('send_message')
+    def handle_message(data):
+        if not isinstance(data, dict):
+            return
+
+        user = current_user()
+        if not user:
+            return
+
+        sid = current_sid()
+
+        # Smart spam detection
+        text = str(data.get('text', '')).strip()
+        if not text:
+            return
+
+        spam_result = check_smart_spam(sid, text)
+        if spam_result == 'cooldown':
+            remaining = cooldown_remaining(sid)
+            emit('cooldown', {
+                'seconds': int(remaining) or SPAM_COOLDOWN_S,
+                'message': f'Slow down! Wait {int(remaining) or SPAM_COOLDOWN_S}s.',
+            })
+            return
+        elif spam_result == 'shadow':
+            # Shadow mute: pretend it worked, nobody else sees it
+            fake_msg_id = _sec.token_hex(8)
+            emit('new_message', {
+                'type': 'text', 'from': user['display'],
+                'color': user['color'], 'text': text,
+                'time': now_ms(), 'to': data.get('to', 'global'),
+                'msg_id': fake_msg_id,
+            })
+            analytics['messages_sent'] += 1
+            return
+
+        if len(text) > MAX_MESSAGE_LEN:
+            text = text[:MAX_MESSAGE_LEN]
+
+        target = str(data.get('to', 'global'))
+
+        # Validate target
+        if target not in ('global',) and target not in rooms and target not in sid_map:
+            return
+
+        user['msg_count'] = user.get('msg_count', 0) + 1
+        analytics['messages_sent'] += 1
+
+        msg_id = _sec.token_hex(8)
+        msg = {
+            'type':       'text',
+            'from':       user['display'],
+            'color':      user['color'],
+            'tag':        user['tag'],
+            'reputation': reputation_label(user['msg_count']),
+            'text':       text,
+            'time':       now_ms(),
+            'to':         target,
+            'msg_id':     msg_id,
+        }
+
+        if 'encrypted' in data:
+            enc = data['encrypted']
+            if isinstance(enc, str) and enc:
+                msg['encrypted'] = enc
+
+        dispatch_message(msg, target)
+
+    # ── send_file ─────────────────────────────────────────────────────────────
+
+    @socketio.on('send_file')
+    def handle_file(data):
+        if not isinstance(data, dict):
+            return
+
+        user = current_user()
+        if not user:
+            return
+
+        url = str(data.get('url', ''))
+        if not url.startswith('/uploads/'):
+            return
+
+        filename = url[len('/uploads/'):]
+        if not filename or not os.path.isfile(os.path.join(UPLOAD_FOLDER, filename)):
+            return
+
+        target = str(data.get('to', 'global'))
+        if target not in ('global',) and target not in rooms and target not in sid_map:
+            return
+
+        user['msg_count'] = user.get('msg_count', 0) + 1
+        analytics['files_uploaded'] += 1
+        msg_id = _sec.token_hex(8)
+        msg = {
+            'type':       'file',
+            'from':       user['display'],
+            'color':      user['color'],
+            'tag':        user['tag'],
+            'reputation': reputation_label(user.get('msg_count', 0)),
+            'url':        url,
+            'name':       str(data.get('name', 'file'))[:260],
+            'file_type':  str(data.get('file_type', 'file'))[:128],
+            'time':       now_ms(),
+            'to':         target,
+            'msg_id':     msg_id,
+        }
+        dispatch_message(msg, target)
+
+    # ── typing indicators ─────────────────────────────────────────────────────
+
+    @socketio.on('typing')
+    def handle_typing(data):
+        user = current_user()
+        if not user or not isinstance(data, dict):
+            return
+        sid = current_sid()
+        set_presence(sid, 'typing')
+        target  = str(data.get('to', 'global'))
+        payload = {'username': user['display'], 'to': target}
+        if target == 'global':
+            emit('typing', payload, broadcast=True, include_self=False)
+        elif target in rooms:
+            emit('typing', payload, to=target, include_self=False)
+        elif target in sid_map:
+            emit('typing', payload, to=sid_map[target])
+
+    @socketio.on('stop_typing')
+    def handle_stop_typing(data):
+        user = current_user()
+        if not user or not isinstance(data, dict):
+            return
+        sid = current_sid()
+        set_presence(sid, 'active')
+        target  = str(data.get('to', 'global'))
+        payload = {'username': user['display'], 'to': target}
+        if target == 'global':
+            emit('stop_typing', payload, broadcast=True, include_self=False)
+        elif target in rooms:
+            emit('stop_typing', payload, to=target, include_self=False)
+        elif target in sid_map:
+            emit('stop_typing', payload, to=sid_map[target])
+
+    # ── user:presence ─────────────────────────────────────────────────────────
+
+    @socketio.on('user:presence')
+    def handle_presence(data):
+        """Client updates its own presence state."""
+        if not isinstance(data, dict):
+            return
+        sid = current_sid()
+        user = current_user()
+        if not user or not sid:
+            return
+        state_str = str(data.get('state', 'active'))
+        set_presence(sid, state_str)
+        # Broadcast updated presence to everyone
+        emit('user:presence', {
+            'display': user['display'],
+            'state':   state_str,
+        }, broadcast=True)
+
+    # ── user:switch_persona ───────────────────────────────────────────────────
+
+    @socketio.on('user:switch_persona')
+    def handle_switch_persona(data):
+        """
+        Switch to a different persona (name + color).
+        The SID stays the same. A system message announces the switch.
+        """
+        if not isinstance(data, dict):
+            return
+        user = current_user()
+        sid  = current_sid()
+        if not user or not sid:
+            return
+
+        new_name = clean_username(data.get('name', ''))
+        new_color = str(data.get('color', user['color']))[:7]
+
+        old_display = user['display']
+
+        # Update sid_map
+        sid_map.pop(old_display, None)
+        user['username'] = new_name
+        user['display']  = f"{new_name}#{user['tag']}"
+        user['color']    = new_color
+        user['persona']  = new_name
+        sid_map[user['display']] = sid
+
+        # Update user_state
+        if sid in user_state:
+            user_state[sid]['username'] = new_name
+            user_state[sid]['color']    = new_color
+
+        # Announce the switch
+        announcement = system_msg(f'{old_display} is now {user["display"]}')
+        emit('system_message', announcement, broadcast=True)
+        emit('user_list', get_user_list(), broadcast=True)
+        emit('persona_switched', {
+            'old': old_display,
+            'new': user['display'],
+        }, broadcast=True)
+
+    # ── room:create ───────────────────────────────────────────────────────────
+
+    @socketio.on('room:create')
+    def handle_room_create(data):
+        """
+        Create a new room.
+
+        Client sends:
+          {name, visibility, password?, ttl?}
+
+        visibility: 'public' | 'private'
+          - public  → no password, appears in room:list
+          - private → optional password, NOT in room:list (join by room_id)
+
+        ttl: '5min' | '1hour' | 'session'
+        """
+        if not isinstance(data, dict):
+            return
+        user = current_user()
+        sid  = current_sid()
+        if not user or not sid:
+            return
+
+        name = clean_room_name(data.get('name', ''))
+        if not name:
+            emit('error', {'message': 'Invalid room name. Use letters, numbers, spaces, - or .'})
+            return
+
+        visibility = str(data.get('visibility', 'public'))
+        if visibility not in ('public', 'private'):
+            visibility = 'public'
+
+        # Password only meaningful for private rooms; create_room enforces this
+        password = str(data.get('password', ''))[:64] or None
+        ttl_key  = str(data.get('ttl', 'session'))
+        ttl      = EPHEMERAL_TTLS.get(ttl_key)
+
+        room = create_room(name, sid, visibility=visibility, password=password, ttl=ttl)
+        if room is None:
+            emit('error', {'message': 'Server is at room capacity. Try again later.'})
+            return
+
+        room_id = room['id']
+
+        # Creator joins immediately
+        room['members'].add(sid)
+        join_room(room_id)
+        users[sid]['room_id'] = room_id
+        if sid in user_state:
+            user_state[sid]['room_id'] = room_id
+
+        emit('room:created', {
+            'room_id':    room_id,
+            'name':       room['name'],
+            'visibility': room['visibility'],
+            'ttl':        ttl,
+            'members':    room_member_list(room_id),
+            'is_admin':   True,
+        })
+
+        # Only update the public list (private rooms don't appear there)
+        emit('room:list', _public_room_list(), broadcast=True)
+
+    # ── room:join ─────────────────────────────────────────────────────────────
+
+    @socketio.on('room:join')
+    def handle_room_join(data):
+        """
+        Join a public room by room_id.
+        Public rooms have no password — if a password is somehow sent it is ignored.
+        For private rooms use room:join_private.
+        """
+        if not isinstance(data, dict):
+            return
+        user = current_user()
+        sid  = current_sid()
+        if not user or not sid:
+            return
+
+        room_id = str(data.get('room_id', ''))
+        room    = get_room(room_id)
+
+        if not room:
+            emit('error', {'message': 'Room not found.'})
+            return
+
+        if room['visibility'] == 'private':
+            emit('error', {'message': 'This is a private room. Use "Join Private Room".'})
+            return
+
+        _do_join_room(sid, user, room)
+
+    @socketio.on('room:join_private')
+    def handle_room_join_private(data):
+        """
+        Join a private room by room_id + optional password.
+        Private rooms are not listed publicly — the user must know the room_id.
+        """
+        if not isinstance(data, dict):
+            return
+        user = current_user()
+        sid  = current_sid()
+        if not user or not sid:
+            return
+
+        room_id  = str(data.get('room_id', ''))
+        password = str(data.get('password', ''))
+        room     = get_room(room_id)
+
+        if not room:
+            emit('error', {'message': 'Room not found.'})
+            return
+
+        if room['visibility'] != 'private':
+            # Public rooms can be joined via room:join — redirect gracefully
+            _do_join_room(sid, user, room)
+            return
+
+        if room['password'] and room['password'] != password:
+            emit('error', {'message': 'Wrong password.'})
+            return
+
+        _do_join_room(sid, user, room)
+
+    # ── room:leave ────────────────────────────────────────────────────────────
+
+    @socketio.on('room:leave')
+    def handle_room_leave(data):
+        user = current_user()
+        sid  = current_sid()
+        if not user or not sid:
+            return
+        _leave_current_room(sid, user)
+        emit('room:left', {})
+
+    # ── room:list ─────────────────────────────────────────────────────────────
+
+    @socketio.on('room:list')
+    def handle_room_list(data):
+        emit('room:list', _public_room_list())
+
+    # ── admin:kick ────────────────────────────────────────────────────────────
+
+    @socketio.on('admin:kick')
+    def handle_kick(data):
+        """Kick a user from a room. Room admin only."""
+        if not isinstance(data, dict):
+            return
+        sid  = current_sid()
+        user = current_user()
+        if not sid or not user:
+            return
+
+        room_id      = str(data.get('room_id', ''))
+        target_disp  = str(data.get('target', ''))
+
+        if not is_room_admin(sid, room_id):
+            emit('error', {'message': 'Not authorised.'})
+            return
+
+        target_sid = sid_map.get(target_disp)
+        if not target_sid:
+            emit('error', {'message': 'User not found.'})
+            return
+
+        room = get_room(room_id)
+        if not room or target_sid not in room['members']:
+            emit('error', {'message': 'User is not in this room.'})
+            return
+
+        # Remove from room
+        room['members'].discard(target_sid)
+        leave_room(room_id, sid=target_sid)
+        if target_sid in users:
+            users[target_sid]['room_id'] = None
+        if target_sid in user_state:
+            user_state[target_sid]['room_id'] = None
+
+        emit('admin:kicked', {'room_id': room_id}, to=target_sid)
+        emit('system_message',
+             system_msg(f'{target_disp} was removed by an admin.'),
+             to=room_id)
+        emit('room:members', room_member_list(room_id), to=room_id)
+
+        if not room['members']:
+            schedule_room_delete(room_id, socketio)
+
+    # ── admin:freeze ──────────────────────────────────────────────────────────
+
+    @socketio.on('admin:freeze')
+    def handle_freeze(data):
+        """Freeze or unfreeze a room. Room admin only."""
+        if not isinstance(data, dict):
+            return
+        sid = current_sid()
+        if not sid:
+            return
+
+        room_id = str(data.get('room_id', ''))
+        freeze  = bool(data.get('freeze', True))
+
+        if not is_room_admin(sid, room_id):
+            emit('error', {'message': 'Not authorised.'})
+            return
+
+        room = get_room(room_id)
+        if not room:
+            return
+
+        room['is_frozen'] = freeze
+        status = 'frozen' if freeze else 'unfrozen'
+        emit('room:frozen', {'room_id': room_id, 'is_frozen': freeze}, to=room_id)
+        emit('system_message',
+             system_msg(f'Room has been {status} by an admin.'),
+             to=room_id)
+
+    # ── admin:mod ─────────────────────────────────────────────────────────────
+
+    @socketio.on('admin:mod')
+    def handle_mod(data):
+        """Grant or revoke mod (admin) status. Room creator only."""
+        if not isinstance(data, dict):
+            return
+        sid  = current_sid()
+        user = current_user()
+        if not sid or not user:
+            return
+
+        room_id     = str(data.get('room_id', ''))
+        target_disp = str(data.get('target', ''))
+        grant       = bool(data.get('grant', True))
+
+        room = get_room(room_id)
+        if not room or room['creator_sid'] != sid:
+            emit('error', {'message': 'Only the room creator can manage mods.'})
+            return
+
+        target_sid = sid_map.get(target_disp)
+        if not target_sid:
+            emit('error', {'message': 'User not found.'})
+            return
+
+        if grant:
+            room['admins'].add(target_sid)
+        else:
+            room['admins'].discard(target_sid)
+
+        action = 'granted mod' if grant else 'removed mod'
+        emit('system_message',
+             system_msg(f'{target_disp} was {action} by {user["display"]}.'),
+             to=room_id)
+        emit('room:members', room_member_list(room_id), to=room_id)
+
+    # ── vote_hide ─────────────────────────────────────────────────────────────
+
+    @socketio.on('vote_hide')
+    def handle_vote_hide(data):
+        if not isinstance(data, dict):
+            return
+        user = current_user()
+        sid  = current_sid()
+        if not user or not sid:
+            return
+
+        msg_id = str(data.get('msg_id', ''))[:32]
+        if not msg_id:
+            return
+
+        # Use sid (not uid) as the voter identity — uid can be spoofed by the client
+        voters = message_votes.setdefault(msg_id, set())
+        voters.add(sid)
+
+        if len(voters) >= HIDE_VOTE_THRESHOLD:
+            emit('hide_message', {'msg_id': msg_id}, broadcast=True)
+            message_votes.pop(msg_id, None)
+        else:
+            emit('vote_count', {
+                'msg_id': msg_id,
+                'votes':  len(voters),
+                'needed': HIDE_VOTE_THRESHOLD,
+            })
+
+    # ── WebRTC signalling ─────────────────────────────────────────────────────
+
+    @socketio.on('webrtc_signal')
+    def handle_webrtc_signal(data):
+        if not isinstance(data, dict):
+            return
+        try:
+            if len(json.dumps(data).encode()) > MAX_SIGNAL_BYTES:
+                return
+        except (TypeError, ValueError):
+            return
+
+        user = current_user()
+        if not user:
+            return
+
+        target = str(data.get('to', ''))
+        if target in sid_map:
+            data['from'] = user['display']
+            emit('webrtc_signal', data, to=sid_map[target])
+        else:
+            emit('webrtc_signal', {
+                'type':  'error',
+                'error': f'User "{target}" is not connected',
+            })
+
+    # ── Legacy call events ────────────────────────────────────────────────────
+
+    _CALL_EVENT_MAP = {
+        'call-user':       'incoming-call',
+        'video-call-user': 'incoming-call',
+        'call-accepted':   'call-started',
+        'call-rejected':   'call-ended',
+        'end-call':        'call-ended',
+    }
+
+    def _make_call_handler(outgoing_event: str):
+        def handler(data=None):
+            target = data.get('to') if isinstance(data, dict) else None
+            relay_to_target(outgoing_event, {}, target)
+        return handler
+
+    for _in, _out in _CALL_EVENT_MAP.items():
+        socketio.on(_in)(_make_call_handler(_out))
+
+    # ── disconnect ────────────────────────────────────────────────────────────
+
+    @socketio.on('disconnect')
+    def handle_disconnect():
+        sid = current_sid()
+        if not sid:
+            return
+
+        user = users.pop(sid, None)
+        if not user:
+            return
+
+        display = user['display']
+        try:
+            sid_map.pop(display, None)
+            public_keys.pop(display, None)
+            spam_tracker.pop(sid, None)
+
+            # Capture room_id BEFORE popping user_state so _leave_current_room_by_sid
+            # can still find it (user_state is the source of truth for room_id here)
+            _leave_current_room_by_sid(sid, display)
+        finally:
+            user_state.pop(sid, None)
+            emit('user_list', get_user_list(), broadcast=True)
+            emit('system_message', system_msg(f'{display} left'), broadcast=True)
+
+    # ── Private helpers ───────────────────────────────────────────────────────
+
+    def _do_join_room(sid: str, user: dict, room: dict) -> None:
+        """Shared join logic used by both room:join and room:join_private."""
+        room_id = room['id']
+
+        # Leave current room first
+        _leave_current_room(sid, user)
+
+        room['members'].add(sid)
+        cancel_room_delete(room_id)
+        join_room(room_id)
+        users[sid]['room_id'] = room_id
+        if sid in user_state:
+            user_state[sid]['room_id'] = room_id
+
+        history = filter_expired(room['messages'], room['ttl'])
+        emit('room:joined', {
+            'room_id':    room_id,
+            'name':       room['name'],
+            'visibility': room['visibility'],
+            'ttl':        room['ttl'],
+            'history':    history,
+            'members':    room_member_list(room_id),
+            'is_admin':   sid in room['admins'],
+            'is_frozen':  room['is_frozen'],
+        })
+
+        emit('system_message',
+             system_msg(f'{user["display"]} joined room {room["name"]}'),
+             to=room_id)
+        emit('room:members', room_member_list(room_id), to=room_id)
+
+    def _leave_current_room(sid: str, user: dict) -> None:
+        """Remove sid from their current room, schedule delete if empty."""
+        room_id = user.get('room_id')
+        if not room_id:
+            return
+        _leave_room_by_id(sid, room_id, user['display'])
+        user['room_id'] = None
+        if sid in user_state:
+            user_state[sid]['room_id'] = None
+
+    def _leave_current_room_by_sid(sid: str, display: str) -> None:
+        """Used during disconnect when user record is already popped."""
+        us = user_state.get(sid, {})
+        room_id = us.get('room_id')
+        if room_id:
+            _leave_room_by_id(sid, room_id, display)
+
+    def _leave_room_by_id(sid: str, room_id: str, display: str) -> None:
+        room = get_room(room_id)
+        if not room:
+            return
+        room['members'].discard(sid)
+        leave_room(room_id)
+        emit('system_message',
+             system_msg(f'{display} left the room.'),
+             to=room_id)
+        emit('room:members', room_member_list(room_id), to=room_id)
+        if not room['members']:
+            schedule_room_delete(room_id, socketio)
+
+    def _public_room_list() -> list:
+        """
+        Return only PUBLIC rooms.
+        Private rooms are never listed — users must know the room_id to join.
+        """
+        return [
+            {
+                'room_id':   r['id'],
+                'name':      r['name'],
+                'members':   len(r['members']),
+                'ttl':       r['ttl'],
+                'is_frozen': r['is_frozen'],
+                # 'locked' is always False for public rooms (no password)
+                # but we include it for forward-compatibility
+                'locked':    False,
+            }
+            for r in rooms.values()
+            if r['visibility'] == 'public'
+        ]

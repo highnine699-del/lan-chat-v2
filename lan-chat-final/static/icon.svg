@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- Dark background gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#121820"/>
+      <stop offset="100%" stop-color="#0a0e13"/>
+    </linearGradient>
+
+    <!-- Neon green glow filter -->
+    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur1"/>
+      <feGaussianBlur stdDeviation="12" result="blur2"/>
+      <feMerge>
+        <feMergeNode in="blur2"/>
+        <feMergeNode in="blur1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Subtle inner glow for the bubble fill -->
+    <filter id="softGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Neon green gradient for strokes -->
+    <linearGradient id="neonGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#00ff88"/>
+      <stop offset="100%" stop-color="#00cc66"/>
+    </linearGradient>
+
+    <!-- Bubble fill: very dark teal tint -->
+    <linearGradient id="bubbleFill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#0d2a1f"/>
+      <stop offset="100%" stop-color="#091a13"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect width="512" height="512" rx="110" ry="110" fill="url(#bgGrad)"/>
+
+  <!-- Subtle grid lines (hacker aesthetic) -->
+  <g opacity="0.06" stroke="#00ff88" stroke-width="1">
+    <line x1="0"   y1="128" x2="512" y2="128"/>
+    <line x1="0"   y1="256" x2="512" y2="256"/>
+    <line x1="0"   y1="384" x2="512" y2="384"/>
+    <line x1="128" y1="0"   x2="128" y2="512"/>
+    <line x1="256" y1="0"   x2="256" y2="512"/>
+    <line x1="384" y1="0"   x2="384" y2="512"/>
+  </g>
+
+  <!-- ── Main speech bubble ─────────────────────────────────────────────── -->
+  <!-- Shadow/glow layer -->
+  <path filter="url(#neonGlow)"
+        d="M256 96
+           C160 96 88 158 88 236
+           C88 285 118 328 164 354
+           L148 416
+           L220 374
+           C231 376 243 377 256 377
+           C352 377 424 315 424 236
+           C424 158 352 96 256 96 Z"
+        fill="none"
+        stroke="#00ff88"
+        stroke-width="3"
+        opacity="0.5"/>
+
+  <!-- Bubble body -->
+  <path d="M256 96
+           C160 96 88 158 88 236
+           C88 285 118 328 164 354
+           L148 416
+           L220 374
+           C231 376 243 377 256 377
+           C352 377 424 315 424 236
+           C424 158 352 96 256 96 Z"
+        fill="url(#bubbleFill)"
+        stroke="url(#neonGrad)"
+        stroke-width="7"
+        stroke-linejoin="round"/>
+
+  <!-- ── WiFi / signal arcs inside the bubble ──────────────────────────── -->
+  <!-- These represent "LAN" — local wireless signal -->
+
+  <!-- Outer arc -->
+  <path filter="url(#softGlow)"
+        d="M174 210
+           A115 115 0 0 1 338 210"
+        fill="none"
+        stroke="#00ff88"
+        stroke-width="14"
+        stroke-linecap="round"
+        opacity="0.9"/>
+
+  <!-- Middle arc -->
+  <path filter="url(#softGlow)"
+        d="M200 236
+           A80 80 0 0 1 312 236"
+        fill="none"
+        stroke="#00ff88"
+        stroke-width="14"
+        stroke-linecap="round"
+        opacity="0.9"/>
+
+  <!-- Inner arc -->
+  <path filter="url(#softGlow)"
+        d="M224 262
+           A45 45 0 0 1 288 262"
+        fill="none"
+        stroke="#00ff88"
+        stroke-width="14"
+        stroke-linecap="round"
+        opacity="0.9"/>
+
+  <!-- Centre dot -->
+  <circle cx="256" cy="288" r="14"
+          fill="#00ff88"
+          filter="url(#neonGlow)"/>
+
+  <!-- ── Neon border accent on the rounded square ──────────────────────── -->
+  <rect width="512" height="512" rx="110" ry="110"
+        fill="none"
+        stroke="#00ff88"
+        stroke-width="6"
+        opacity="0.25"/>
+</svg>

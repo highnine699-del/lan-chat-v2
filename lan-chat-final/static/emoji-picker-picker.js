@@ -1,4 +1,4 @@
-import Database from './database.js';
+import Database from './emoji-picker-database.js';
 
 // via https://unpkg.com/browse/emojibase-data@6.0.0/meta/groups.json
 const allGroups = [

@@ -146,27 +146,31 @@ class LanChatLauncher:
                 universal_newlines=True
             )
             
-            # Wait for ngrok to start and read the tunnel URL
-            time.sleep(2)
-            
-            # Get ngrok public URL from API
-            try:
+            # Poll the ngrok API until it responds or we time out (10 s).
+            # A fixed sleep(2) is unreliable on slow machines.
+            import urllib.request as _urllib
+            import json as _json
+            tunnels = []
+            deadline = time.time() + 10
+            while time.time() < deadline:
                 try:
-                    import urllib.request as _urllib
-                    import json as _json
-                    with _urllib.urlopen("http://localhost:4040/api/tunnels", timeout=5) as resp:
+                    with _urllib.urlopen(
+                        "http://localhost:4040/api/tunnels", timeout=1
+                    ) as resp:
                         tunnels = _json.loads(resp.read()).get("tunnels", [])
+                    if tunnels:
+                        break
                 except Exception:
-                    tunnels = []
-                if tunnels:
-                    self.public_url = tunnels[0].get("public_url")
-                    self.url_label.config(text=f"Public URL: {self.public_url}", fg="green")
-                    self.status_label.config(text="Status: Running ✓", fg="green")
-                    self.copy_btn.config(state=tk.NORMAL)
-                    return
-            except:
-                pass
-            
+                    pass
+                time.sleep(0.5)
+
+            if tunnels:
+                self.public_url = tunnels[0].get("public_url")
+                self.url_label.config(text=f"Public URL: {self.public_url}", fg="green")
+                self.status_label.config(text="Status: Running ✓", fg="green")
+                self.copy_btn.config(state=tk.NORMAL)
+                return
+
             self.url_label.config(text="Public URL: ngrok started (check terminal for URL)", fg="orange")
             self.status_label.config(text="Status: Running ✓", fg="green")
             

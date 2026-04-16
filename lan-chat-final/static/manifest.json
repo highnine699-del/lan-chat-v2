@@ -4,13 +4,14 @@
   "description": "Offline WhatsApp-like chat over local WiFi",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#111b21",
-  "theme_color": "#202c33",
+  "background_color": "#0a0e13",
+  "theme_color": "#00ff88",
   "icons": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>",
+      "src": "/static/icon.svg",
       "sizes": "any",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
   ]
 }

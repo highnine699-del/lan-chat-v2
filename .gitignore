@@ -3,3 +3,9 @@ uploads/
 *.pdf
 *.docx
 .vscode/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/

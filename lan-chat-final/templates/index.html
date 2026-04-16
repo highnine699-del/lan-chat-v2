@@ -3,9 +3,11 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>LAN Chat</title>
   <link rel="manifest" href="/static/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+  <link rel="apple-touch-icon" href="/static/icon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;500;600&display=swap" rel="stylesheet">
   <!-- Emoji Picker (bundled locally - works offline) -->
@@ -40,12 +42,35 @@
       box-sizing: border-box;
     }
 
+    /* ── Base layout (desktop-first) ────────────────────────────────────────── */
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+
     body {
       font-family: 'Segoe UI', -apple-system, system-ui, sans-serif;
       background: var(--bg-primary);
       color: var(--text-primary);
       height: 100vh;
       overflow: hidden;
+    }
+
+    /* Mobile: use dynamic viewport height so keyboard doesn't push content off */
+    @media (max-width: 768px) {
+
+      html,
+      body {
+        height: 100dvh;
+        overflow: hidden;
+        /* Safe-area insets for notched phones */
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
     }
 
     /* LOGIN SCREEN */
@@ -71,13 +96,14 @@
     .login-logo {
       width: 80px;
       height: 80px;
-      background: var(--accent);
-      border-radius: 50%;
+      background: transparent;
+      border-radius: 20px;
       display: flex;
       align-items: center;
       justify-content: center;
       margin: 0 auto 20px;
       font-size: 40px;
+      box-shadow: 0 0 24px rgba(0, 255, 136, 0.4), 0 0 48px rgba(0, 255, 136, 0.15);
     }
 
     .login-box h1 {
@@ -132,11 +158,19 @@
       transform: scale(0.98);
     }
 
-    /* APP LAYOUT */
+    /* APP LAYOUT — desktop default */
     #app {
       display: none;
       height: 100vh;
       flex-direction: row;
+    }
+
+    /* Mobile override */
+    @media (max-width: 768px) {
+      #app {
+        height: 100dvh;
+        flex-direction: column;
+      }
     }
 
     /* SIDEBAR */
@@ -537,9 +571,13 @@
       align-items: flex-end;
       gap: 6px;
       padding: 8px 10px;
+      /* Extra bottom padding for phones with home indicator */
+      padding-bottom: max(8px, env(safe-area-inset-bottom));
       background: var(--bg-secondary);
       flex-shrink: 0;
-      position: relative;
+      position: sticky;
+      bottom: 0;
+      z-index: 10;
     }
 
     .input-box {
@@ -632,36 +670,95 @@
       display: none;
     }
 
-    /* CALL OVERLAY */
+    /* ── CALL OVERLAY ──────────────────────────────────────────────────── */
     #call-overlay {
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.85);
+      background: #0a0e13;
       z-index: 999;
       flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 20px;
     }
 
     #call-overlay.active {
       display: flex;
     }
 
+    /* Video PiP wrapper — only shown for video calls */
+    #call-video-pip {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+    }
+
+    /* Remote video fills the whole overlay */
+    #remote-video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #111;
+      border-radius: 0;
+    }
+
+    /* Local (self) video — PiP in top-right corner */
+    #local-video {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 120px;
+      height: 90px;
+      object-fit: cover;
+      background: #1a2332;
+      border-radius: 12px;
+      border: 2px solid rgba(0, 255, 136, 0.4);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+      z-index: 2;
+      cursor: pointer;
+    }
+
+    /* Gradient scrim at the bottom so text/buttons are readable */
+    #call-overlay::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 55%;
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.85) 0%, transparent 100%);
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* Info + controls sit above the scrim */
+    #call-ui {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 3;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-bottom: max(32px, env(safe-area-inset-bottom));
+      gap: 6px;
+    }
+
+    /* Avatar shown when no remote video */
     .call-avatar {
-      width: 100px;
-      height: 100px;
+      width: 96px;
+      height: 96px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 48px;
+      font-size: 44px;
       font-weight: 700;
-      margin-bottom: 8px;
+      margin-bottom: 12px;
       animation: pulse 2s infinite;
       border: 3px solid rgba(255, 255, 255, 0.2);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(0, 168, 132, 0.2);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 24px rgba(0, 168, 132, 0.25);
     }
 
     @keyframes pulse {
@@ -677,106 +774,172 @@
     }
 
     .call-name {
-      font-size: 28px;
+      font-size: 26px;
       font-weight: 600;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
     }
 
     .call-status {
       color: var(--text-secondary);
-      font-size: 15px;
-      margin-top: -8px;
+      font-size: 14px;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+      margin-bottom: 20px;
     }
 
     .call-buttons {
       display: flex;
-      gap: 30px;
-      margin-top: 16px;
+      gap: 20px;
+      align-items: center;
+      margin-bottom: 8px;
     }
 
+    /* Base pill button */
     .call-btn {
-      width: 68px;
-      height: 68px;
-      border-radius: 50%;
-      border: 2px solid rgba(255, 255, 255, 0.3);
-      font-size: 26px;
+      height: 60px;
+      min-width: 60px;
+      border-radius: 30px;
+      border: none;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.3s;
-      font-weight: 600;
+      transition: all 0.22s;
+      backdrop-filter: blur(8px);
+      padding: 0 20px;
+    }
+
+    .call-btn svg {
+      width: 26px;
+      height: 26px;
+      flex-shrink: 0;
     }
 
     .call-btn:hover {
-      transform: scale(1.08);
+      transform: scale(1.07);
     }
 
     .call-btn:active {
-      transform: scale(0.92);
+      transform: scale(0.93);
     }
 
+    /* End call — wide red pill */
     .call-btn.end {
-      background: #ff4455;
-      color: white;
-      box-shadow: 0 0 15px rgba(255, 68, 85, 0.5), inset 0 0 10px rgba(255, 255, 255, 0.1);
+      background: #e53935;
+      padding: 0 28px;
+      box-shadow: 0 4px 24px rgba(229, 57, 53, 0.55);
+    }
+
+    .call-btn.end svg {
+      fill: #fff;
     }
 
     .call-btn.end:hover {
-      box-shadow: 0 0 25px rgba(255, 68, 85, 0.8), inset 0 0 15px rgba(255, 255, 255, 0.2);
+      background: #ef5350;
+      box-shadow: 0 4px 32px rgba(229, 57, 53, 0.8);
     }
 
+    /* Accept — green pill */
     .call-btn.accept {
       background: var(--accent);
-      color: #0a0e13;
-      box-shadow: var(--neon-glow), inset 0 0 10px rgba(0, 255, 136, 0.2);
+      padding: 0 28px;
+      box-shadow: var(--neon-glow);
+    }
+
+    .call-btn.accept svg {
+      fill: #0a0e13;
     }
 
     .call-btn.accept:hover {
-      box-shadow: var(--neon-glow-strong), inset 0 0 15px rgba(0, 255, 136, 0.3);
+      box-shadow: var(--neon-glow-strong);
     }
 
+    /* Reject — red pill */
     .call-btn.reject {
-      background: #ff4455;
-      color: white;
-      box-shadow: 0 0 15px rgba(255, 68, 85, 0.5), inset 0 0 10px rgba(255, 255, 255, 0.1);
+      background: #e53935;
+      padding: 0 28px;
+      box-shadow: 0 4px 24px rgba(229, 57, 53, 0.55);
     }
 
+    .call-btn.reject svg {
+      fill: #fff;
+    }
+
+    .call-btn.reject:hover {
+      background: #ef5350;
+    }
+
+    /* Mute — dark pill, accent icon */
     .call-btn.mute {
-      background: var(--bg-tertiary);
-      color: var(--accent);
-      box-shadow: 0 0 10px rgba(0, 255, 136, 0.3), inset 0 0 8px rgba(0, 255, 136, 0.1);
+      background: rgba(26, 35, 50, 0.85);
+      border: 1.5px solid rgba(0, 255, 136, 0.25);
+    }
+
+    .call-btn.mute svg {
+      fill: #e9edef;
     }
 
     .call-btn.mute:hover {
-      box-shadow: 0 0 15px rgba(0, 255, 136, 0.5), inset 0 0 10px rgba(0, 255, 136, 0.2);
+      border-color: var(--accent);
     }
 
+    /* Muted state — red tint */
+    .call-btn.mute.active-mute {
+      background: rgba(229, 57, 53, 0.2);
+      border-color: rgba(229, 57, 53, 0.5);
+    }
+
+    .call-btn.mute.active-mute svg {
+      fill: #ef5350;
+    }
+
+    /* Camera — dark pill, accent icon */
     .call-btn.vid {
-      background: var(--bg-tertiary);
-      color: var(--accent);
-      box-shadow: 0 0 10px rgba(0, 255, 136, 0.3), inset 0 0 8px rgba(0, 255, 136, 0.1);
+      background: rgba(26, 35, 50, 0.85);
+      border: 1.5px solid rgba(0, 255, 136, 0.25);
     }
 
-    #local-video,
-    #remote-video {
-      position: absolute;
-      border-radius: 12px;
-      object-fit: cover;
+    .call-btn.vid svg {
+      fill: #e9edef;
     }
 
-    #remote-video {
-      width: 300px;
-      height: 200px;
-      background: #111;
-      top: 40px;
+    .call-btn.vid:hover {
+      border-color: var(--accent);
     }
 
-    #local-video {
-      width: 120px;
-      height: 90px;
-      background: #222;
-      top: 40px;
-      right: 40px;
+    /* Camera off state — red tint */
+    .call-btn.vid.cam-off {
+      background: rgba(229, 57, 53, 0.2);
+      border-color: rgba(229, 57, 53, 0.5);
+    }
+
+    .call-btn.vid.cam-off svg {
+      fill: #ef5350;
+    }
+
+    @media (max-width: 768px) {
+      #local-video {
+        width: 90px;
+        height: 68px;
+        top: 12px;
+        right: 12px;
+      }
+
+      .call-btn {
+        height: 54px;
+        min-width: 54px;
+        border-radius: 27px;
+      }
+
+      .call-btn svg {
+        width: 22px;
+        height: 22px;
+      }
+
+      .call-btn.end,
+      .call-btn.accept,
+      .call-btn.reject {
+        padding: 0 22px;
+      }
     }
 
     /* RECORD UI */
@@ -916,6 +1079,191 @@
     .no-chat {
       display: flex;
     }
+
+    /* ── Reputation badges ─────────────────────────────────────────────── */
+    .rep-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 6px;
+      margin-left: 5px;
+      vertical-align: middle;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .rep-new {
+      background: rgba(255, 255, 255, 0.1);
+      color: #7fa999;
+    }
+
+    .rep-active {
+      background: rgba(0, 255, 136, 0.15);
+      color: #00ff88;
+    }
+
+    .rep-trusted {
+      background: rgba(0, 255, 136, 0.3);
+      color: #00ff88;
+      box-shadow: 0 0 6px rgba(0, 255, 136, 0.4);
+    }
+
+    /* ── Vote-to-hide button ───────────────────────────────────────────── */
+    .vote-hide-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 11px;
+      opacity: 0;
+      transition: opacity 0.2s;
+      padding: 0 2px;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+
+    .bubble:hover .vote-hide-btn {
+      opacity: 0.6;
+    }
+
+    .vote-hide-btn:hover {
+      opacity: 1 !important;
+    }
+
+    .vote-count {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-left: 4px;
+    }
+
+    /* ── Toast notification ────────────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(0, 255, 136, 0.15);
+      border: 1px solid rgba(0, 255, 136, 0.4);
+      color: var(--accent);
+      padding: 8px 18px;
+      border-radius: 20px;
+      font-size: 13px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s, transform 0.3s;
+      z-index: 2000;
+      white-space: nowrap;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ── Connection state banner ───────────────────────────────────────────── */
+    #conn-banner {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 9999;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 12px;
+      /* Push content down so it doesn't overlap the banner */
+      transition: background 0.3s, color 0.3s;
+    }
+
+    /* When banner is visible, nudge the app down */
+    body.conn-banner-visible #app,
+    body.conn-banner-visible #login-screen {
+      padding-top: 30px;
+    }
+
+    /* ── Mobile touch improvements ─────────────────────────────────────────── */
+    /* Prevent text selection during long-press */
+    .chat-item,
+    .bubble-sender {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    /* ── Single mobile breakpoint (768px) — all mobile overrides live here ── */
+    @media (max-width: 768px) {
+
+      /* Larger tap targets */
+      .icon-btn {
+        width: 44px;
+        height: 44px;
+      }
+
+      .send-btn {
+        width: 48px;
+        height: 48px;
+      }
+
+      .call-btn {
+        width: 72px;
+        height: 72px;
+      }
+
+      /* Full-width chat area */
+      #app {
+        flex-direction: column;
+      }
+
+      .chat-area {
+        width: 100%;
+      }
+
+      /* Sidebar slides in as a fixed overlay — toggled via ☰ button */
+      .sidebar {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 85vw;
+        max-width: 320px;
+        z-index: 500;
+        box-shadow: 4px 0 20px rgba(0, 0, 0, 0.6);
+      }
+
+      .sidebar.mobile-open {
+        display: flex;
+      }
+
+      /* Dim overlay behind open sidebar */
+      .sidebar-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 499;
+      }
+
+      .sidebar-overlay.active {
+        display: block;
+      }
+
+      /* Show toggle buttons only on mobile */
+      #sidebar-open-btn {
+        display: block !important;
+      }
+
+      #sidebar-close-btn {
+        display: block !important;
+      }
+
+      /* Login box fits small screens */
+      .login-box {
+        width: 92vw;
+        padding: 28px 20px;
+      }
+    }
   </style>
 </head>
 
@@ -924,7 +1272,9 @@
   <!-- LOGIN -->
   <div id="login-screen">
     <div class="login-box">
-      <div class="login-logo">💬</div>
+      <div class="login-logo">
+        <img src="/static/icon.svg" alt="LAN Chat" style="width:56px;height:56px;display:block;">
+      </div>
       <h1>LAN Chat</h1>
       <p>Connect with people on your WiFi — no internet needed</p>
       <input type="text" id="username-input" class="login-input" placeholder="Enter your name..." maxlength="20"
@@ -935,13 +1285,25 @@
     </div>
   </div>
 
+  <!-- CONNECTION STATE BANNER -->
+  <div id="conn-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;
+       text-align:center;font-size:13px;font-weight:600;padding:6px 12px;
+       transition:background 0.3s,color 0.3s;">
+  </div>
+
+  <!-- SIDEBAR OVERLAY (mobile) -->
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar(false)"></div>
+
   <!-- MAIN APP -->
   <div id="app">
     <!-- SIDEBAR -->
-    <div class="sidebar">
+    <div class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div id="my-avatar" class="my-avatar" title="Your profile"></div>
         <span class="sidebar-title" id="my-name">LAN Chat</span>
+        <!-- Close button — only visible on mobile when sidebar is open -->
+        <button id="sidebar-close-btn" onclick="toggleSidebar(false)" style="display:none;background:none;border:none;color:var(--accent);
+                 font-size:22px;cursor:pointer;padding:4px 8px;margin-left:auto;" title="Close">✕</button>
       </div>
 
       <div class="search-bar">
@@ -977,6 +1339,9 @@
       <!-- Active chat view (hidden by default, shown when chat selected) -->
       <div id="active-chat" style="display:none; flex-direction:column; flex:1; min-height:0;">
         <div class="chat-header">
+          <!-- ☰ sidebar toggle — only visible on mobile -->
+          <button id="sidebar-open-btn" onclick="toggleSidebar(true)" style="display:none;background:none;border:none;color:var(--accent);
+                   font-size:22px;cursor:pointer;padding:4px 8px;flex-shrink:0;" title="Chats">☰</button>
           <div class="chat-header-avatar" id="header-avatar"></div>
           <div class="chat-header-info">
             <div class="chat-header-name" id="header-name">Global Chat</div>
@@ -1008,7 +1373,8 @@
           <button class="icon-btn" onclick="toggleEmoji()" title="Emoji" id="emoji-btn">😊</button>
           <button class="icon-btn" onclick="document.getElementById('file-input').click()"
             title="Attach file">📎</button>
-          <input type="file" id="file-input" onchange="sendFile(this)" />
+          <input type="file" id="file-input" accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.txt"
+            onchange="sendFile(this)" />
           <textarea class="input-box" id="msg-input" placeholder="Type a message" rows="1" onkeydown="handleKey(event)"
             oninput="onTyping(this)"></textarea>
           <button class="icon-btn" id="mic-btn" onclick="toggleRecord()" title="Voice message">🎤</button>
@@ -1034,24 +1400,60 @@
 
   <!-- CALL OVERLAY -->
   <div id="call-overlay">
-    <video id="remote-video" autoplay playsinline></video>
-    <video id="local-video" autoplay muted playsinline></video>
-    <audio id="remote-audio" autoplay></audio>
-    <div class="call-avatar" id="call-avatar"></div>
-    <div class="call-name" id="call-name"></div>
-    <div class="call-status" id="call-status">Calling...</div>
-
-    <!-- Incoming call action buttons -->
-    <div class="call-buttons" id="call-action-buttons" style="display:none;">
-      <button class="call-btn accept" id="accept-btn" title="Accept call">✅ Accept</button>
-      <button class="call-btn reject" id="reject-btn" title="Reject call">❌ Reject</button>
+    <!-- Video elements — hidden for voice calls -->
+    <div id="call-video-pip" style="display:none;">
+      <video id="remote-video" autoplay playsinline></video>
+      <video id="local-video" autoplay muted playsinline></video>
     </div>
+    <audio id="remote-audio" autoplay></audio>
 
-    <!-- Active call control buttons -->
-    <div class="call-buttons" id="call-control-buttons">
-      <button class="call-btn mute" id="mute-btn" onclick="toggleMute()" title="Mute">🎙️</button>
-      <button class="call-btn end" onclick="endCall()" title="End call">📵</button>
-      <button class="call-btn vid" id="cam-btn" onclick="toggleCam()" title="Camera">📷</button>
+    <!-- Bottom UI panel -->
+    <div id="call-ui">
+      <div class="call-avatar" id="call-avatar"></div>
+      <div class="call-name" id="call-name"></div>
+      <div class="call-status" id="call-status">Calling...</div>
+
+      <!-- Incoming call action buttons -->
+      <div class="call-buttons" id="call-action-buttons" style="display:none;">
+        <!-- Reject -->
+        <button class="call-btn reject" id="reject-btn" title="Reject call">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path
+              d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9a11.05 11.05 0 0 1-2.38 1.44c-.33.12-.7.04-.96-.22l-2.1-2.1a.96.96 0 0 1-.27-.67c0-.25.1-.49.27-.67C3.93 9.65 7.79 8 12 8s8.07 1.65 10.6 4.5c.17.18.27.42.27.67 0 .25-.1.49-.27.67l-2.1 2.1c-.26.26-.63.34-.96.22a11.05 11.05 0 0 1-2.38-1.44.99.99 0 0 1-.56-.9v-3.1A12.86 12.86 0 0 0 12 9z" />
+          </svg>
+        </button>
+        <!-- Accept -->
+        <button class="call-btn accept" id="accept-btn" title="Accept call">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path
+              d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Active call control buttons -->
+      <div class="call-buttons" id="call-control-buttons">
+        <!-- Mute mic -->
+        <button class="call-btn mute" id="mute-btn" onclick="toggleMute()" title="Mute">
+          <svg id="mute-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path
+              d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm0 2a2 2 0 0 0-2 2v7a2 2 0 0 0 4 0V5a2 2 0 0 0-2-2zm-7 8a1 1 0 0 1 1 1 6 6 0 0 0 12 0 1 1 0 0 1 2 0 8 8 0 0 1-7 7.93V21h2a1 1 0 0 1 0 2H9a1 1 0 0 1 0-2h2v-1.07A8 8 0 0 1 4 12a1 1 0 0 1 1-1z" />
+          </svg>
+        </button>
+        <!-- End call — wide red pill -->
+        <button class="call-btn end" onclick="endCall()" title="End call">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path
+              d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9a11.05 11.05 0 0 1-2.38 1.44c-.33.12-.7.04-.96-.22l-2.1-2.1a.96.96 0 0 1-.27-.67c0-.25.1-.49.27-.67C3.93 9.65 7.79 8 12 8s8.07 1.65 10.6 4.5c.17.18.27.42.27.67 0 .25-.1.49-.27.67l-2.1 2.1c-.26.26-.63.34-.96.22a11.05 11.05 0 0 1-2.38-1.44.99.99 0 0 1-.56-.9v-3.1A12.86 12.86 0 0 0 12 9z" />
+          </svg>
+        </button>
+        <!-- Camera toggle (video calls only) -->
+        <button class="call-btn vid" id="cam-btn" onclick="toggleCam()" title="Camera">
+          <svg id="cam-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M15 8H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1.5l4 2.5V9l-4 2.5V10a2 2 0 0 0-2-2z" />
+          </svg>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -1060,17 +1462,26 @@
     <img id="lightbox-img" src="" alt="">
   </div>
 
+  <!-- TOAST -->
+  <div id="toast"></div>
+
   <script>
     // ─── STATE ────────────────────────────────────────────────
     const state = {
       socket: null,
       username: '',
+      tag: '',
+      display: '',        // "username#tag" — the canonical identity string
+      uid: '',            // persistent device ID from localStorage
       currentChat: 'global',
       users: [],
       chatMessages: { global: [] },
       typingTimers: {},
       typingUsers: {},
       unread: {},
+      mutedUsers: new Set(),   // display strings the local user has muted
+      currentRoom: null,       // room_id of the active room (null = global/DM)
+      roomList: [],            // cached list of public rooms from server
       mediaRecorder: null,
       audioChunks: [],
       recordTimer: null,
@@ -1083,12 +1494,12 @@
       camOff: false,
       callState: 'idle',
       callTimeout: null,
-      iceCandidateBuffer: [],  // Buffer ICE candidates until connection ready
+      iceCandidateBuffer: [],
       // ── E2E Encryption ──────────────────────────────────────────────
-      myKeyPair: null,          // CryptoKeyPair (ECDH P-256)
-      myPublicKeyJwk: null,     // JWK of our public key (shared with peers)
-      peerPublicKeys: {},       // username -> CryptoKey (imported ECDH public key)
-      sharedSecrets: {},        // username -> CryptoKey (AES-GCM derived key)
+      myKeyPair: null,
+      myPublicKeyJwk: null,
+      peerPublicKeys: {},
+      sharedSecrets: {},
     };
 
     // ─── E2E ENCRYPTION ───────────────────────────────────────────────
@@ -1189,6 +1600,17 @@
       if (!name) { alert('Please enter a name'); return; }
       state.username = name;
 
+      // Load or generate a persistent device UID stored in localStorage.
+      // This lets the same device keep its #TAG across page refreshes.
+      let uid = localStorage.getItem('lanchat_uid');
+      if (!uid) {
+        uid = crypto.randomUUID ? crypto.randomUUID()
+          : Array.from(crypto.getRandomValues(new Uint8Array(16)))
+            .map(b => b.toString(16).padStart(2, '0')).join('');
+        localStorage.setItem('lanchat_uid', uid);
+      }
+      state.uid = uid;
+
       document.getElementById('login-screen').style.display = 'none';
       document.getElementById('app').style.display = 'flex';
       document.getElementById('active-chat').style.display = 'flex';
@@ -1202,7 +1624,6 @@
 
       // Generate E2E key pair before connecting
       await E2E.generateKeys();
-      console.log('[E2E] Key pair generated');
 
       connectSocket();
       switchChat('global');
@@ -1210,22 +1631,83 @@
 
     // ─── SOCKET ────────────────────────────────────────────────
     function connectSocket() {
-      state.socket = io();
+      state.socket = io({
+        reconnection: true,
+        reconnectionAttempts: 10,          // cap — prevents infinite battery drain
+        reconnectionDelay: 500,
+        reconnectionDelayMax: 5000,        // exponential backoff ceiling
+      });
       const s = state.socket;
 
+      // Guard: prevents duplicate room rejoin when connect fires multiple times
+      let _hasRejoined = false;
+
+      // ── Connection state UI ───────────────────────────────────────────────
+      function setConnBanner(text, bg, color) {
+        const b = document.getElementById('conn-banner');
+        if (!b) return;
+        b.textContent = text;
+        b.style.background = bg;
+        b.style.color = color;
+        b.style.display = text ? 'block' : 'none';
+        document.body.classList.toggle('conn-banner-visible', !!text);
+      }
+
       s.on('connect', () => {
-        s.emit('join', { username: state.username, publicKey: state.myPublicKeyJwk });
+        setConnBanner('', '', '');   // hide banner — connected
+        // Re-join with identity on every connect (handles reconnects too)
+        s.emit('join', {
+          username: state.username,
+          uid: state.uid,
+          publicKey: state.myPublicKeyJwk,
+        });
+        // Rejoin room only once per connection cycle — guard prevents duplicates
+        if (state.currentRoom && !_hasRejoined) {
+          s.emit('room:join', { room_id: state.currentRoom });
+          _hasRejoined = true;
+        }
+      });
+
+      s.on('disconnect', () => {
+        _hasRejoined = false;   // reset so next connect can rejoin
+        setConnBanner('🔴 Disconnected — reconnecting…', '#1a0a0a', '#ff4455');
+      });
+
+      s.on('reconnecting', (attempt) => {
+        setConnBanner(`🟡 Reconnecting… (${attempt}/10)`, '#1a1500', '#f0b429');
+      });
+
+      s.on('reconnect', () => {
+        setConnBanner('🟢 Reconnected', '#0a1a0f', '#00ff88');
+        setTimeout(() => setConnBanner('', '', ''), 2000);
+      });
+
+      s.on('reconnect_failed', () => {
+        // All 10 attempts exhausted — show a manual "Tap to reconnect" button
+        const b = document.getElementById('conn-banner');
+        if (b) {
+          b.innerHTML = '🔴 Connection lost. <button onclick="state.socket.connect()" ' +
+            'style="margin-left:10px;padding:3px 10px;border-radius:8px;' +
+            'background:#00ff88;color:#0a0e13;border:none;cursor:pointer;font-weight:700;">' +
+            'Tap to reconnect</button>';
+          b.style.background = '#1a0a0a';
+          b.style.color = '#ff4455';
+          b.style.display = 'block';
+          document.body.classList.add('conn-banner-visible');
+        }
       });
 
       s.on('joined', data => {
-        // Server may have adjusted the username (e.g. duplicate)
+        // Server confirms identity with tag
+        state.tag = data.tag;
+        state.display = data.display;   // "username#tag"
         if (data.username !== state.username) {
           state.username = data.username;
-          document.getElementById('my-name').textContent = state.username;
-          const color = stringToColor(state.username);
-          document.getElementById('my-avatar').style.background = color;
-          document.getElementById('my-avatar').textContent = state.username[0].toUpperCase();
         }
+        document.getElementById('my-name').textContent = state.display;
+        const color = stringToColor(state.username);
+        document.getElementById('my-avatar').style.background = color;
+        document.getElementById('my-avatar').textContent = state.username[0].toUpperCase();
       });
 
       // Receive a peer's public key
@@ -1237,10 +1719,44 @@
 
       // Receive all current peers' public keys on join
       s.on('all_keys', async keys => {
-        for (const [username, jwk] of Object.entries(keys)) {
-          if (username !== state.username) {
-            await E2E.registerPeerKey(username, jwk);
+        for (const [display, jwk] of Object.entries(keys)) {
+          if (display !== state.display) {
+            await E2E.registerPeerKey(display, jwk);
           }
+        }
+      });
+
+      // Spam cooldown notification
+      s.on('cooldown', data => {
+        const input = document.getElementById('msg-input');
+        input.disabled = true;
+        input.placeholder = `⏳ Slow down! Wait ${data.seconds}s…`;
+        input.style.opacity = '0.5';
+        setTimeout(() => {
+          input.disabled = false;
+          input.placeholder = 'Type a message';
+          input.style.opacity = '';
+        }, data.seconds * 1000);
+      });
+
+      // Vote-to-hide feedback
+      s.on('vote_count', data => {
+        const el = document.querySelector(`[data-msg-id="${data.msg_id}"] .vote-count`);
+        if (el) el.textContent = `${data.votes}/${data.needed} votes to hide`;
+      });
+
+      // Hide a message that reached the vote threshold
+      s.on('hide_message', data => {
+        const el = document.querySelector(`[data-msg-id="${data.msg_id}"]`);
+        if (el) {
+          el.style.opacity = '0.3';
+          el.style.filter = 'blur(3px)';
+          el.title = 'Hidden by community vote';
+          el.onclick = () => {
+            el.style.opacity = '';
+            el.style.filter = '';
+            el.onclick = null;
+          };
         }
       });
 
@@ -1257,15 +1773,15 @@
         addMessage(msg, true);
 
         // Notify about new message
-        if (msg.from !== state.username) {
-          notifyNewMessage(msg.from, msg.text || msg.file?.name || '[File]');
+        if (msg.from !== state.display) {
+          notifyNewMessage(msg.from, msg.text || msg.name || '[File]');
         }
 
         // Unread badge
         if (msg.to === 'global' && state.currentChat !== 'global') {
           incrementUnread('global');
         } else if (msg.to !== 'global') {
-          const other = msg.from === state.username ? msg.to : msg.from;
+          const other = msg.from === state.display ? msg.to : msg.from;
           if (other !== state.currentChat) {
             incrementUnread(other);
           }
@@ -1281,7 +1797,7 @@
       });
 
       s.on('typing', data => {
-        if (data.username === state.username) return;
+        if (data.username === state.display) return;   // ignore own typing echo
         const chatId = data.to === 'global' ? 'global' : data.username;
         if (!state.typingUsers[chatId]) state.typingUsers[chatId] = new Set();
         state.typingUsers[chatId].add(data.username);
@@ -1301,124 +1817,333 @@
 
       s.on('webrtc_signal', handleSignal);
 
+      // ── Server error messages ─────────────────────────────────────────────
+      s.on('error', data => {
+        showToast('⚠️ ' + (data.message || 'An error occurred'));
+      });
+
+      // ── Presence updates ──────────────────────────────────────────────────
+      s.on('user:presence', data => {
+        // Update the presence dot colour in the user list
+        const item = document.getElementById('chat-item-' + CSS.escape(data.display));
+        if (item) {
+          const dot = item.querySelector('.online-dot');
+          if (dot) {
+            const colours = {
+              'active': 'var(--accent)',
+              'idle': '#f0b429',
+              'typing': 'var(--accent)',
+              'in-call': '#ff4455',
+              'recording': '#ff4455',
+              'uploading': '#53bdeb',
+            };
+            dot.style.background = colours[data.state] || 'var(--accent)';
+            dot.title = data.state;
+          }
+        }
+      });
+
+      // ── Persona switch announcement ───────────────────────────────────────
+      s.on('persona_switched', data => {
+        // Update any chat items that used the old display name
+        const oldItem = document.getElementById('chat-item-' + CSS.escape(data.old));
+        if (oldItem) {
+          oldItem.id = 'chat-item-' + CSS.escape(data.new);
+          const nameSpan = oldItem.querySelector('.chat-item-name span');
+          if (nameSpan) nameSpan.textContent = data.new;
+        }
+        // If we were chatting with this person, update the header
+        if (state.currentChat === data.old) {
+          state.currentChat = data.new;
+          document.getElementById('header-name').textContent = data.new;
+        }
+      });
+
+      // ── Room events ───────────────────────────────────────────────────────
+      s.on('room:created', data => {
+        state.currentRoom = data.room_id;
+        showToast(`Room "${data.name}" created`);
+        // Refresh the room list in the sidebar if it's open
+        s.emit('room:list', {});
+      });
+
+      s.on('room:joined', data => {
+        state.currentRoom = data.room_id;
+        // Load room history into the chat
+        if (data.history && data.history.length) {
+          data.history.forEach(m => addMessage(m, false));
+        }
+        showToast(`Joined room "${data.name}"`);
+        if (data.is_frozen) {
+          showToast('⚠️ This room is frozen — messages are disabled');
+        }
+      });
+
+      s.on('room:left', () => {
+        state.currentRoom = null;
+      });
+
+      s.on('room:list', rooms => {
+        // Store for the room browser UI
+        state.roomList = rooms;
+        renderRoomList(rooms);
+      });
+
+      s.on('room:members', members => {
+        // Update member count in header if we're in a room
+        if (state.currentRoom) {
+          const statusEl = document.getElementById('header-status');
+          if (statusEl) statusEl.textContent = `${members.length} members`;
+        }
+      });
+
+      s.on('room:frozen', data => {
+        if (data.room_id === state.currentRoom) {
+          const input = document.getElementById('msg-input');
+          const sendBtn = document.querySelector('.send-btn');
+          if (data.is_frozen) {
+            if (input) { input.disabled = true; input.placeholder = '🔒 Room is frozen'; }
+            if (sendBtn) sendBtn.disabled = true;
+            showToast('🔒 Room frozen by admin');
+          } else {
+            if (input) { input.disabled = false; input.placeholder = 'Type a message'; }
+            if (sendBtn) sendBtn.disabled = false;
+            showToast('✅ Room unfrozen');
+          }
+        }
+      });
+
+      s.on('room:deleted', data => {
+        if (data.room_id === state.currentRoom) {
+          state.currentRoom = null;
+          showToast('Room was deleted (empty for too long)');
+          switchChat('global');
+        }
+      });
+
+      s.on('admin:kicked', data => {
+        if (data.room_id === state.currentRoom) {
+          state.currentRoom = null;
+          showToast('⚠️ You were removed from the room by an admin');
+          switchChat('global');
+        }
+      });
+
       // Request notification permission
       requestNotificationPermission();
     }
 
     // ─── NOTIFICATIONS ────────────────────────────────────────
+
+    // Shared AudioContext — created once, reused for every sound.
+    // Lazy-initialised on first user gesture to satisfy autoplay policy.
+    let _audioCtx = null;
+    function getAudioCtx() {
+      if (!_audioCtx || _audioCtx.state === 'closed') {
+        _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      // Resume if suspended (browser autoplay policy)
+      if (_audioCtx.state === 'suspended') _audioCtx.resume();
+      return _audioCtx;
+    }
+
+    // Per-sender throttle: suppress repeat browser notifications within this window (ms).
+    const _notifyThrottle = new Map();   // tag -> timestamp
+    const NOTIFY_THROTTLE_MS = 3000;
+
+    // Active Notification objects keyed by tag so we can close/replace them.
+    const _activeNotifs = new Map();
+
     function requestNotificationPermission() {
-      if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission();
+      if (!('Notification' in window)) return;
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().then(perm => {
+          if (perm === 'granted') {
+            showToast('🔔 Desktop notifications enabled');
+          }
+        });
       }
     }
 
+    /**
+     * showNotification(title, options)
+     *
+     * options:
+     *   body        – notification body text
+     *   tag         – unique tag; replaces any existing notification with the same tag
+     *   soundType   – 'beep' (default) | 'ring' | 'none'
+     *   requireInteraction – keep notification until user dismisses (calls)
+     *   onClick     – callback when the notification is clicked
+     *
+     * Rules:
+     *  • Never fires if the window is focused AND the relevant chat is active.
+     *  • Browser notification is throttled per-tag to avoid spam.
+     *  • Sound plays only when the window is not focused (browser handles its own sound).
+     */
     function showNotification(title, options = {}) {
-      // Browser notification
+      const tag = options.tag || 'chat-notification';
+      const soundType = options.soundType ?? 'beep';
+      const windowFocused = document.hasFocus();
+
+      // ── Browser notification ──────────────────────────────────────────────
       if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification(title, {
-          icon: '/static/manifest.json',
-          tag: 'chat-notification',
-          ...options
-        });
+        const now = Date.now();
+        const lastSent = _notifyThrottle.get(tag) || 0;
+
+        if (now - lastSent >= NOTIFY_THROTTLE_MS) {
+          _notifyThrottle.set(tag, now);
+
+          // Close any existing notification with the same tag before creating a new one
+          const prev = _activeNotifs.get(tag);
+          if (prev) { try { prev.close(); } catch (_) { } }
+
+          const notif = new Notification(title, {
+            icon: '/static/icon.svg',
+            body: options.body || '',
+            tag,
+            requireInteraction: options.requireInteraction || false,
+            silent: true,   // we handle sound ourselves to avoid double-audio
+          });
+
+          notif.onclick = () => {
+            window.focus();
+            if (typeof options.onClick === 'function') options.onClick();
+            notif.close();
+          };
+
+          notif.onclose = () => {
+            if (_activeNotifs.get(tag) === notif) _activeNotifs.delete(tag);
+          };
+
+          _activeNotifs.set(tag, notif);
+        }
       }
 
-      // Sound notification
-      const soundType = options.soundType || 'beep';
-      if (soundType === 'ring') {
-        playRingTone();
-      } else {
-        playNotificationSound();
+      // ── Sound ─────────────────────────────────────────────────────────────
+      // Only play sound when the window is not focused; focused window already
+      // has the message appearing in the chat area.
+      if (!windowFocused && soundType !== 'none') {
+        if (soundType === 'ring') {
+          playRingTone();
+        } else {
+          playNotificationSound();
+        }
       }
     }
 
     function playNotificationSound() {
-      // Simple beep for messages
       try {
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
+        const ctx = getAudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
 
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
 
-        oscillator.frequency.value = 800;
-        oscillator.type = 'sine';
+        osc.frequency.value = 880;
+        osc.type = 'sine';
 
-        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+        const t = ctx.currentTime;
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(0.25, t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
 
-        oscillator.start(audioContext.currentTime);
-        oscillator.stop(audioContext.currentTime + 0.5);
+        osc.start(t);
+        osc.stop(t + 0.4);
       } catch (e) {
-        console.log('[Notification] Could not play sound:', e.message);
+        console.warn('[Notification] Could not play sound:', e.message);
       }
     }
 
-    function playRingTone() {
-      // Realistic phone ringing tone
-      try {
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        let time = audioContext.currentTime;
+    // Stop an active ring tone early (e.g. call accepted/rejected).
+    let _ringStopFns = [];
+    function stopRingTone() {
+      _ringStopFns.forEach(fn => { try { fn(); } catch (_) { } });
+      _ringStopFns = [];
+    }
 
-        // Ring pattern: 0.5s ring, 0.5s silence, repeating
+    function playRingTone() {
+      stopRingTone(); // cancel any previous ring
+      try {
+        const ctx = getAudioCtx();
         const ringDuration = 0.5;
         const silenceDuration = 0.5;
-        const repeatCount = 6; // 6 rings = 3 seconds
+        const repeatCount = 6;
+        const oscillators = [];
 
         for (let i = 0; i < repeatCount; i++) {
-          const startTime = time + (i * (ringDuration + silenceDuration));
+          const startTime = ctx.currentTime + i * (ringDuration + silenceDuration);
 
-          // Create two tones for richer sound (like real phone rings)
-          const frequencies = [800, 1200]; // Dual tone
-
-          frequencies.forEach(freq => {
-            const osc = audioContext.createOscillator();
-            const gain = audioContext.createGain();
+          [800, 1200].forEach(freq => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
 
             osc.connect(gain);
-            gain.connect(audioContext.destination);
+            gain.connect(ctx.destination);
 
             osc.frequency.value = freq;
             osc.type = 'sine';
 
-            // Fade in and out
             gain.gain.setValueAtTime(0, startTime);
-            gain.gain.linearRampToValueAtTime(0.25, startTime + 0.05);
-            gain.gain.setValueAtTime(0.25, startTime + ringDuration - 0.1);
+            gain.gain.linearRampToValueAtTime(0.2, startTime + 0.05);
+            gain.gain.setValueAtTime(0.2, startTime + ringDuration - 0.1);
             gain.gain.linearRampToValueAtTime(0, startTime + ringDuration);
 
             osc.start(startTime);
             osc.stop(startTime + ringDuration);
+            oscillators.push(osc);
           });
         }
+
+        // Register stop function so the ring can be cancelled early
+        _ringStopFns.push(() => {
+          oscillators.forEach(o => { try { o.stop(); } catch (_) { } });
+        });
       } catch (e) {
-        console.log('[Notification] Could not play ring tone:', e.message);
+        console.warn('[Notification] Could not play ring tone:', e.message);
       }
     }
 
+    // Per-sender message notification throttle (separate from the browser-notif throttle).
+    const _msgNotifyTimers = new Map();  // chatId -> timer handle
+
     function notifyNewMessage(from, preview) {
-      // Don't notify if this chat is currently active
-      const chatId = from === state.username ? '' : from;
-      if (chatId === state.currentChat) return;
+      // Don't notify if this chat is currently active AND the window is focused
+      const chatId = from === state.display ? 'global' : from;
+      if (chatId === state.currentChat && document.hasFocus()) return;
 
-      const title = `📨 New message from ${from}`;
-      const messagePreview = preview.substring(0, 50) + (preview.length > 50 ? '...' : '');
+      // Debounce: if multiple messages arrive quickly from the same sender,
+      // only fire one notification after a short delay (shows latest preview).
+      clearTimeout(_msgNotifyTimers.get(chatId));
+      _msgNotifyTimers.set(chatId, setTimeout(() => {
+        _msgNotifyTimers.delete(chatId);
 
-      showNotification(title, {
-        body: messagePreview,
-        tag: `msg-${from}`,
-        soundType: 'beep'
-      });
+        // Truncate preview safely (handles multi-byte / emoji)
+        const maxLen = 60;
+        const safePreview = [...preview].slice(0, maxLen).join('') +
+          ([...preview].length > maxLen ? '…' : '');
+
+        showNotification(`📨 ${from}`, {
+          body: safePreview,
+          tag: `msg-${chatId}`,
+          soundType: 'beep',
+          onClick: () => switchChat(chatId),
+        });
+      }, 400));
     }
 
     function notifyIncomingCall(from, callType) {
       const title = callType === 'video' ? '📹 Incoming video call' : '☎️ Incoming call';
 
       showNotification(title, {
-        body: `${from} is calling...`,
-        tag: 'incoming-call',
+        body: `${from} is calling…`,
+        tag: `call-${from}`,
         requireInteraction: true,
-        soundType: 'ring'
+        soundType: 'ring',
+        onClick: () => {
+          // Bring the call overlay into view
+          document.getElementById('call-overlay')?.classList.add('active');
+        },
       });
     }
 
@@ -1426,7 +2151,7 @@
     async function addMessage(msg, live) {
       // Decrypt private messages
       if (msg.encrypted && msg.to !== 'global') {
-        const peer = msg.from === state.username ? msg.to : msg.from;
+        const peer = msg.from === state.display ? msg.to : msg.from;
         const plaintext = await E2E.decrypt(msg.encrypted, peer);
         if (plaintext !== null) {
           msg = { ...msg, text: plaintext };
@@ -1436,7 +2161,7 @@
       }
 
       const chatId = msg.to === 'global' ? 'global'
-        : (msg.from === state.username ? msg.to : msg.from);
+        : (msg.from === state.display ? msg.to : msg.from);
 
       if (!state.chatMessages[chatId]) state.chatMessages[chatId] = [];
       state.chatMessages[chatId].push(msg);
@@ -1452,20 +2177,34 @@
     }
 
     function renderMsg(msg) {
-      const isMe = msg.from === state.username;
+      const isMe = msg.from === state.display;
+
+      // Skip messages from muted users
+      if (!isMe && state.mutedUsers.has(msg.from)) return;
+
       const wrapper = document.createElement('div');
       wrapper.className = 'msg-wrapper ' + (isMe ? 'me' : 'other');
+      if (msg.msg_id) wrapper.dataset.msgId = msg.msg_id;
 
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
 
-      // Sender name (only in global and not me)
+      // Sender name + tag + reputation (only in global and not me)
       if (!isMe && msg.to === 'global') {
-        const sender = document.createElement('div');
-        sender.className = 'bubble-sender';
-        sender.style.color = msg.color || '#25d366';
-        sender.textContent = msg.from;
-        bubble.appendChild(sender);
+        const senderRow = document.createElement('div');
+        senderRow.className = 'bubble-sender';
+        senderRow.style.color = msg.color || '#25d366';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = msg.from;   // already "username#tag"
+
+        const repBadge = document.createElement('span');
+        repBadge.className = 'rep-badge rep-' + (msg.reputation || 'New').toLowerCase();
+        repBadge.textContent = msg.reputation || 'New';
+
+        senderRow.appendChild(nameSpan);
+        senderRow.appendChild(repBadge);
+        bubble.appendChild(senderRow);
       }
 
       // Content
@@ -1477,6 +2216,12 @@
       } else if (msg.type === 'file') {
         const el = renderFileContent(msg);
         bubble.appendChild(el);
+      } else {
+        // Unknown message type — render a safe fallback
+        const text = document.createElement('div');
+        text.className = 'bubble-text';
+        text.textContent = '[Unsupported message type]';
+        bubble.appendChild(text);
       }
 
       // Time
@@ -1484,6 +2229,49 @@
       time.className = 'bubble-time';
       time.textContent = formatTime(msg.time);
       bubble.appendChild(time);
+
+      // Vote-to-hide button (only on others' messages in global chat)
+      if (!isMe && msg.msg_id && msg.to === 'global') {
+        const voteBtn = document.createElement('button');
+        voteBtn.className = 'vote-hide-btn';
+        voteBtn.title = 'Vote to hide this message';
+        voteBtn.textContent = '🚩';
+        voteBtn.onclick = (e) => {
+          e.stopPropagation();
+          state.socket.emit('vote_hide', { msg_id: msg.msg_id });
+          voteBtn.disabled = true;
+          voteBtn.style.opacity = '0.4';
+          // Show a small counter placeholder
+          const counter = document.createElement('span');
+          counter.className = 'vote-count';
+          counter.textContent = '1/3 votes';
+          bubble.appendChild(counter);
+        };
+        bubble.appendChild(voteBtn);
+
+        // Mute user — long-press on mobile, right-click on desktop
+        const senderRow = bubble.querySelector('.bubble-sender');
+        if (senderRow) {
+          senderRow.style.cursor = 'pointer';
+          senderRow.title = 'Hold to mute this user';
+
+          function _toggleMuteSender(e) {
+            e.preventDefault();
+            if (state.mutedUsers.has(msg.from)) {
+              state.mutedUsers.delete(msg.from);
+              showToast(`Unmuted ${msg.from}`);
+            } else {
+              state.mutedUsers.add(msg.from);
+              showToast(`Muted ${msg.from} — their messages are now hidden`);
+            }
+          }
+
+          // Desktop: right-click
+          senderRow.addEventListener('contextmenu', _toggleMuteSender);
+          // Mobile: long-press (500 ms)
+          attachLongPress(senderRow, _toggleMuteSender);
+        }
+      }
 
       wrapper.appendChild(bubble);
       document.getElementById('messages').appendChild(wrapper);
@@ -1515,7 +2303,27 @@
         a.href = msg.url;
         a.target = '_blank';
         a.download = msg.name;
-        a.innerHTML = `<span class="file-attach-icon">📄</span><div><div class="file-attach-name">${msg.name}</div><div class="file-attach-size">Tap to download</div></div>`;
+        a.rel = 'noopener noreferrer';
+
+        // Build child nodes with textContent — never innerHTML — to prevent XSS
+        const icon = document.createElement('span');
+        icon.className = 'file-attach-icon';
+        icon.textContent = '📄';
+
+        const info = document.createElement('div');
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'file-attach-name';
+        nameEl.textContent = msg.name;   // safe: textContent, not innerHTML
+
+        const sizeEl = document.createElement('div');
+        sizeEl.className = 'file-attach-size';
+        sizeEl.textContent = 'Tap to download';
+
+        info.appendChild(nameEl);
+        info.appendChild(sizeEl);
+        a.appendChild(icon);
+        a.appendChild(info);
         return a;
       }
     }
@@ -1547,6 +2355,18 @@
       const text = input.value.trim();
       if (!text) return;
 
+      // ── "Sending…" feedback for slow mobile networks ──────────────────────
+      // Clear input immediately so the user knows it was accepted,
+      // then show a temporary "sending" indicator in the chat.
+      input.value = '';
+      input.style.height = 'auto';
+
+      const sendBtn = document.querySelector('.send-btn');
+      if (sendBtn) {
+        sendBtn.style.opacity = '0.5';
+        sendBtn.disabled = true;
+      }
+
       let payload = { to: state.currentChat, text };
 
       // Encrypt private messages end-to-end
@@ -1554,14 +2374,18 @@
         const ciphertext = await E2E.encrypt(text, state.currentChat);
         if (ciphertext) {
           payload.encrypted = ciphertext;
-          payload.text = '🔒'; // placeholder; recipient will decrypt
+          payload.text = '🔒';
         }
       }
 
       state.socket.emit('send_message', payload);
       state.socket.emit('stop_typing', { to: state.currentChat });
-      input.value = '';
-      input.style.height = 'auto';
+
+      // Restore send button
+      if (sendBtn) {
+        sendBtn.style.opacity = '';
+        sendBtn.disabled = false;
+      }
     }
 
     function handleKey(e) {
@@ -1595,6 +2419,13 @@
       try {
         const res = await fetch('/upload', { method: 'POST', body: formData });
         const data = await res.json();
+
+        if (!res.ok) {
+          // Server returned an error (413, 400, 500, etc.)
+          alert('Upload failed: ' + (data.error || `Server error ${res.status}`));
+          return;
+        }
+
         state.socket.emit('send_file', {
           to: state.currentChat,
           url: data.url,
@@ -1655,13 +2486,19 @@
         try {
           const res = await fetch('/upload', { method: 'POST', body: formData });
           const data = await res.json();
+          if (!res.ok) {
+            console.error('[Record] Upload failed:', data.error || res.status);
+            return;
+          }
           state.socket.emit('send_file', {
             to: state.currentChat,
             url: data.url,
             name: data.name,
             file_type: 'audio/webm'
           });
-        } catch { }
+        } catch (err) {
+          console.error('[Record] Upload error:', err.message);
+        }
       };
 
       state.mediaRecorder.stop();
@@ -1682,20 +2519,45 @@
     }
 
     // ─── EMOJI PICKER ────────────────────────────────────────────
-    function toggleEmoji() {
-      const container = document.getElementById('emoji-container');
-      container.style.display = container.style.display === 'block' ? 'none' : 'block';
-    }
-
-    document.addEventListener('emoji-click', e => {
-      document.getElementById('msg-input').value += e.detail.unicode;
-      document.getElementById('emoji-container').style.display = 'none';
-      document.getElementById('msg-input').focus();
+    // The emoji-picker custom element is registered by a type="module" script
+    // which loads asynchronously. We wait for it to be defined before showing
+    // the picker so it never opens as an empty/broken element.
+    let _emojiReady = false;
+    customElements.whenDefined('emoji-picker').then(() => {
+      _emojiReady = true;
+    }).catch(() => {
+      // Custom elements not supported — picker will be unavailable
+      const btn = document.getElementById('emoji-btn');
+      if (btn) btn.style.display = 'none';
     });
 
+    function toggleEmoji() {
+      if (!_emojiReady) {
+        showToast('Emoji picker loading…');
+        return;
+      }
+      const container = document.getElementById('emoji-container');
+      // getComputedStyle reads the actual display value regardless of whether
+      // it was set via inline style or the stylesheet.
+      const isVisible = getComputedStyle(container).display !== 'none';
+      container.style.display = isVisible ? 'none' : 'block';
+    }
+
+    // emoji-click bubbles to document — works even after DOM re-renders
+    document.addEventListener('emoji-click', e => {
+      const input = document.getElementById('msg-input');
+      if (input) {
+        input.value += e.detail.unicode;
+        input.focus();
+      }
+      document.getElementById('emoji-container').style.display = 'none';
+    });
+
+    // Close picker when clicking outside it
     document.addEventListener('click', e => {
       if (!e.target.closest('#emoji-container') && !e.target.closest('#emoji-btn')) {
-        document.getElementById('emoji-container').style.display = 'none';
+        const c = document.getElementById('emoji-container');
+        if (c) c.style.display = 'none';
       }
     });
 
@@ -1717,7 +2579,7 @@
         av.style.fontSize = '20px';
         av.textContent = '🌍';
       } else {
-        const user = state.users.find(u => u.username === chatId);
+        const user = state.users.find(u => u.display === chatId);
         document.getElementById('header-name').textContent = chatId;
         document.getElementById('header-status').textContent = '🔒 End-to-end encrypted';
         const av = document.getElementById('header-avatar');
@@ -1752,13 +2614,28 @@
       const list = document.getElementById('chat-list');
 
       users.forEach(u => {
-        if (u.username === state.username) return;
-        let item = document.getElementById('chat-item-' + u.username);
+        if (u.display === state.display) return;   // skip self
+        const chatId = u.display;
+        let item = document.getElementById('chat-item-' + CSS.escape(chatId));
         if (!item) {
           item = document.createElement('div');
           item.className = 'chat-item user-item';
-          item.id = 'chat-item-' + u.username;
-          item.onclick = () => switchChat(u.username);
+          item.id = 'chat-item-' + CSS.escape(chatId);
+          item.onclick = () => switchChat(chatId);
+
+          // Mute — long-press on mobile, right-click on desktop
+          function _toggleMuteUser(e) {
+            e.preventDefault();
+            if (state.mutedUsers.has(chatId)) {
+              state.mutedUsers.delete(chatId);
+              showToast(`Unmuted ${chatId}`);
+            } else {
+              state.mutedUsers.add(chatId);
+              showToast(`Muted ${chatId}`);
+            }
+          }
+          item.addEventListener('contextmenu', _toggleMuteUser);
+          attachLongPress(item, _toggleMuteUser);
 
           const avatar = document.createElement('div');
           avatar.className = 'chat-avatar';
@@ -1768,19 +2645,28 @@
           const info = document.createElement('div');
           info.className = 'chat-item-info';
 
-          const name = document.createElement('div');
-          name.className = 'chat-item-name';
-          name.textContent = u.username;
+          const nameRow = document.createElement('div');
+          nameRow.className = 'chat-item-name';
+
+          const nameSpan = document.createElement('span');
+          nameSpan.textContent = u.display;
+
+          const repBadge = document.createElement('span');
+          repBadge.className = 'rep-badge rep-' + (u.reputation || 'new').toLowerCase();
+          repBadge.textContent = u.reputation || 'New';
+
+          nameRow.appendChild(nameSpan);
+          nameRow.appendChild(repBadge);
 
           const preview = document.createElement('div');
           preview.className = 'chat-item-preview';
-          preview.id = 'preview-' + u.username;
+          preview.id = 'preview-' + CSS.escape(chatId);
           preview.textContent = 'Click to chat privately';
 
           const dot = document.createElement('div');
           dot.className = 'online-dot';
 
-          info.appendChild(name);
+          info.appendChild(nameRow);
           info.appendChild(preview);
           item.appendChild(avatar);
           item.appendChild(info);
@@ -1788,7 +2674,7 @@
           list.appendChild(item);
         }
 
-        if (u.username === state.currentChat) item.classList.add('active');
+        if (chatId === state.currentChat) item.classList.add('active');
       });
 
       // Update header status
@@ -1804,7 +2690,7 @@
         : msg.file_type?.startsWith('image') ? '📷 Image'
           : msg.file_type?.startsWith('audio') ? '🎤 Voice message'
             : '📎 File';
-      preview.textContent = (msg.from === state.username ? 'You: ' : '') + text;
+      preview.textContent = (msg.from === state.display ? 'You: ' : '') + text;
     }
 
     function incrementUnread(chatId) {
@@ -1815,17 +2701,66 @@
       if (!badge) {
         badge = document.createElement('div');
         badge.className = 'unread-badge';
-        badge.style.cssText = 'background:var(--accent);color:white;border-radius:50%;width:20px;height:20px;font-size:11px;display:flex;align-items:center;justify-content:center;margin-left:auto;flex-shrink:0;';
+        badge.style.cssText = 'background:var(--accent);color:#0a0e13;border-radius:50%;width:20px;height:20px;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;margin-left:auto;flex-shrink:0;';
         item.appendChild(badge);
       }
       badge.textContent = state.unread[chatId];
     }
 
     function filterChats() {
-      const query = document.getElementById('search-box').value.toLowerCase();
+      const query = document.getElementById('search-box').value.trim().toLowerCase();
       document.querySelectorAll('.chat-item').forEach(item => {
         const name = item.querySelector('.chat-item-name')?.textContent.toLowerCase() || '';
+        // Use includes for substring match; handles accented chars reasonably
         item.style.display = name.includes(query) ? '' : 'none';
+      });
+    }
+
+    // ─── ROOM LIST ────────────────────────────────────────────────
+    // Renders public rooms into the sidebar chat list.
+    // Private rooms are never listed — users join them by room_id directly.
+    function renderRoomList(rooms) {
+      // Remove stale room items
+      document.querySelectorAll('.chat-item.room-item').forEach(el => el.remove());
+      if (!rooms || !rooms.length) return;
+
+      const list = document.getElementById('chat-list');
+
+      rooms.forEach(r => {
+        const id = 'chat-item-room-' + r.room_id;
+        if (document.getElementById(id)) return;   // already rendered
+
+        const item = document.createElement('div');
+        item.className = 'chat-item room-item';
+        item.id = id;
+        item.onclick = () => {
+          state.socket.emit('room:join', { room_id: r.room_id });
+          toggleSidebar(false);
+        };
+
+        const avatar = document.createElement('div');
+        avatar.className = 'chat-avatar';
+        avatar.style.background = '#1a3a5c';
+        avatar.style.fontSize = '18px';
+        avatar.textContent = '🏠';
+
+        const info = document.createElement('div');
+        info.className = 'chat-item-info';
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'chat-item-name';
+        nameEl.textContent = r.name;
+
+        const preview = document.createElement('div');
+        preview.className = 'chat-item-preview';
+        preview.textContent = `${r.members} member${r.members !== 1 ? 's' : ''}` +
+          (r.is_frozen ? ' · 🔒 frozen' : '');
+
+        info.appendChild(nameEl);
+        info.appendChild(preview);
+        item.appendChild(avatar);
+        item.appendChild(info);
+        list.appendChild(item);
       });
     }
 
@@ -1900,6 +2835,11 @@
       document.getElementById('call-status').textContent = type === 'voice' ? 'Calling...' : 'Video calling...';
       document.getElementById('call-action-buttons').style.display = 'none';
       document.getElementById('call-control-buttons').style.display = 'flex';
+
+      // Show video PiP and camera button only for video calls
+      const isVideo = type === 'video';
+      document.getElementById('call-video-pip').style.display = isVideo ? 'block' : 'none';
+      document.getElementById('cam-btn').style.display = isVideo ? 'flex' : 'none';
 
       // Set timeout for unanswered calls (30 seconds)
       state.callTimeout = setTimeout(() => {
@@ -2115,6 +3055,11 @@
         document.getElementById('call-name').textContent = data.from;
         document.getElementById('call-status').textContent = `📞 ${data.callType === 'video' ? 'Video' : 'Voice'} call from ${data.from}...`;
 
+        // Show/hide video PiP and camera button based on call type
+        const isVideoCall = data.callType === 'video';
+        document.getElementById('call-video-pip').style.display = isVideoCall ? 'block' : 'none';
+        document.getElementById('cam-btn').style.display = isVideoCall ? 'flex' : 'none';
+
         // Show action buttons, hide control buttons
         document.getElementById('call-action-buttons').style.display = 'flex';
         document.getElementById('call-control-buttons').style.display = 'none';
@@ -2130,6 +3075,7 @@
           const rejectBtn = document.getElementById('reject-btn');
 
           const handleAccept = () => {
+            stopRingTone();   // stop ring immediately on accept
             acceptBtn.removeEventListener('click', handleAccept);
             rejectBtn.removeEventListener('click', handleReject);
             resolve(true);
@@ -2295,6 +3241,19 @@
           console.log('[Call] Setting remote description with offer');
           await state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
 
+          // Flush any ICE candidates that arrived before setRemoteDescription
+          if (state.iceCandidateBuffer.length > 0) {
+            console.log('[WebRTC] Flushing', state.iceCandidateBuffer.length, 'buffered ICE candidates (callee)');
+            for (const candidate of state.iceCandidateBuffer) {
+              try {
+                await state.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+              } catch (err) {
+                console.warn('[WebRTC] Error adding buffered ICE (callee):', err.message);
+              }
+            }
+            state.iceCandidateBuffer = [];
+          }
+
           console.log('[Call] Creating answer');
           const answer = await state.peerConnection.createAnswer();
 
@@ -2351,7 +3310,7 @@
           }
           state.iceCandidateBuffer = [];
 
-          // Clear call timeout
+          // Clear call timeout — the callee answered
           if (state.callTimeout) {
             clearTimeout(state.callTimeout);
             state.callTimeout = null;
@@ -2365,8 +3324,9 @@
 
       } else if (data.type === 'ice') {
         console.log('[WebRTC] Received ICE candidate');
-        if (!state.peerConnection) {
-          console.warn('[WebRTC] Buffering ICE - no peer connection yet');
+        if (!state.peerConnection || !state.peerConnection.remoteDescription) {
+          // Buffer candidates until remote description is set
+          console.log('[WebRTC] Buffering ICE candidate — remote description not yet set');
           state.iceCandidateBuffer.push(data.candidate);
           return;
         }
@@ -2447,6 +3407,7 @@
 
     function endCall() {
       console.log('[Call] Ending call');
+      stopRingTone();   // cancel any active ring tone immediately
       stopStatsMonitoring();
 
       // Clear ICE candidate buffer
@@ -2495,12 +3456,22 @@
       document.getElementById('call-action-buttons').style.display = 'none';
       document.getElementById('call-control-buttons').style.display = 'flex';
 
+      // Close any lingering call notification before clearing callTarget
+      if (state.callTarget) {
+        const callNotif = _activeNotifs.get(`call-${state.callTarget}`);
+        if (callNotif) { try { callNotif.close(); } catch (_) { } }
+      }
+
       // Reset state
       state.callTarget = null;
       state.callType = null;
       state.callState = 'idle';
       state.muted = false;
       state.camOff = false;
+
+      // Close any lingering call notification
+      const callNotif = _activeNotifs.get(`call-${state.callTarget}`);
+      if (callNotif) { try { callNotif.close(); } catch (_) { } }
 
       // Reset button states
       document.getElementById('mute-btn').textContent = '🎙️';
@@ -2511,14 +3482,24 @@
       if (!state.localStream) return;
       state.muted = !state.muted;
       state.localStream.getAudioTracks().forEach(t => t.enabled = !state.muted);
-      document.getElementById('mute-btn').textContent = state.muted ? '🔇' : '🎙️';
+      const btn = document.getElementById('mute-btn');
+      btn.classList.toggle('active-mute', state.muted);
+      // Swap icon: mic-off when muted
+      document.getElementById('mute-icon').innerHTML = state.muted
+        ? '<path d="M19 11a7 7 0 0 1-.78 3.22L5.92 2.35A4 4 0 0 1 16 5v6a4 4 0 0 1-.06.69M3.27 3.27 2 4.54l4 4A7 7 0 0 0 11 19.93V21H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-1.07A8 8 0 0 0 19.46 12l1.27-1.27M8 5v.18L16.82 14A4 4 0 0 1 8 12V5zM2.27 2.27 1 3.54l2 2A7.93 7.93 0 0 0 4 12a1 1 0 0 0 2 0 6 6 0 0 1-.08-1L2.27 2.27z"/>'
+        : '<path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm0 2a2 2 0 0 0-2 2v7a2 2 0 0 0 4 0V5a2 2 0 0 0-2-2zm-7 8a1 1 0 0 1 1 1 6 6 0 0 0 12 0 1 1 0 0 1 2 0 8 8 0 0 1-7 7.93V21h2a1 1 0 0 1 0 2H9a1 1 0 0 1 0-2h2v-1.07A8 8 0 0 1 4 12a1 1 0 0 1 1-1z"/>';
     }
 
     function toggleCam() {
       if (!state.localStream) return;
       state.camOff = !state.camOff;
       state.localStream.getVideoTracks().forEach(t => t.enabled = !state.camOff);
-      document.getElementById('cam-btn').textContent = state.camOff ? '🚫' : '📷';
+      const btn = document.getElementById('cam-btn');
+      btn.classList.toggle('cam-off', state.camOff);
+      // Swap icon: camera-off when disabled
+      document.getElementById('cam-icon').innerHTML = state.camOff
+        ? '<path d="M2 2 1 3l4.586 4.586A2 2 0 0 0 5 8v6a2 2 0 0 0 2 2h8.414L21 22l1-1L2 2zm3 6.414L17.586 20H7a1 1 0 0 1-1-1V8.414zM21 7l-4 2.5V10a2 2 0 0 0-2-2h-1.586l-2-2H15a2 2 0 0 1 2 2v.086L21 7z"/>'
+        : '<path d="M15 8H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1.5l4 2.5V9l-4 2.5V10a2 2 0 0 0-2-2z"/>';
     }
 
     // ─── UTILS ────────────────────────────────────────────────────
@@ -2528,6 +3509,119 @@
       for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
       return colors[Math.abs(hash) % colors.length];
     }
+
+    let _toastTimer;
+    let _toastQueue = [];
+    let _toastBusy = false;
+
+    function showToast(msg, duration = 2500) {
+      _toastQueue.push({ msg, duration });
+      if (!_toastBusy) _drainToastQueue();
+    }
+
+    function _drainToastQueue() {
+      if (!_toastQueue.length) { _toastBusy = false; return; }
+      _toastBusy = true;
+      const { msg, duration } = _toastQueue.shift();
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      clearTimeout(_toastTimer);
+      _toastTimer = setTimeout(() => {
+        el.classList.remove('show');
+        // Small gap between toasts so they feel distinct
+        setTimeout(_drainToastQueue, 300);
+      }, duration);
+    }
+
+    // ─── SIDEBAR TOGGLE (mobile) ─────────────────────────────────────────────
+    function toggleSidebar(open) {
+      const sidebar = document.getElementById('sidebar');
+      const overlay = document.getElementById('sidebar-overlay');
+      if (!sidebar || !overlay) return;
+      if (open) {
+        sidebar.classList.add('mobile-open');
+        overlay.classList.add('active');
+      } else {
+        sidebar.classList.remove('mobile-open');
+        overlay.classList.remove('active');
+      }
+    }
+
+    // ─── LONG PRESS HELPER ───────────────────────────────────────────────────
+    // Works on both touch (mobile) and mouse (desktop).
+    // Fires callback after 500 ms hold.
+    // Cancels if the finger moves more than 10 px — prevents conflict with scroll.
+    function attachLongPress(el, callback, delay = 500) {
+      let timer = null;
+      let startX = 0;
+      let startY = 0;
+
+      function start(e) {
+        if (e.type === 'mousedown' && e.button !== 0) return;
+        if (e.type === 'touchstart') {
+          startX = e.touches[0].clientX;
+          startY = e.touches[0].clientY;
+        }
+        timer = setTimeout(() => {
+          callback(e);
+          // Haptic feedback on Android
+          if (navigator.vibrate) navigator.vibrate(10);
+          timer = null;
+        }, delay);
+      }
+
+      function move(e) {
+        if (!timer) return;
+        if (e.type === 'touchmove') {
+          const dx = Math.abs(e.touches[0].clientX - startX);
+          const dy = Math.abs(e.touches[0].clientY - startY);
+          // Cancel if finger moved more than 10 px — user is scrolling
+          if (dx > 10 || dy > 10) cancel();
+        }
+      }
+
+      function cancel() {
+        if (timer) { clearTimeout(timer); timer = null; }
+      }
+
+      el.addEventListener('touchstart', start, { passive: true });
+      el.addEventListener('touchmove', move, { passive: true });
+      el.addEventListener('touchend', cancel, { passive: true });
+      el.addEventListener('touchcancel', cancel, { passive: true });
+      el.addEventListener('mousedown', start);
+      el.addEventListener('mouseup', cancel);
+      el.addEventListener('mouseleave', cancel);
+    }
+
+    // ─── BACKGROUND KILL PREVENTION ──────────────────────────────────────────
+    // When the user switches back to the tab/app after it was backgrounded,
+    // ensure the socket is still connected. Guard prevents reconnecting when
+    // already connected (avoids race conditions).
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && state.socket && !state.socket.connected) {
+        state.socket.connect();
+      }
+    });
+
+    // ─── NETWORK AWARENESS ───────────────────────────────────────────────────
+    window.addEventListener('offline', () => {
+      const b = document.getElementById('conn-banner');
+      if (b) {
+        b.textContent = '📵 No network connection';
+        b.style.background = '#1a0a0a';
+        b.style.color = '#ff4455';
+        b.style.display = 'block';
+        document.body.classList.add('conn-banner-visible');
+      }
+    });
+
+    window.addEventListener('online', () => {
+      // Network came back — reconnect if needed
+      if (state.socket && !state.socket.connected) {
+        state.socket.connect();
+      }
+    });
 
     // Enter key for login
     document.getElementById('username-input').focus();

@@ -1,3 +1,3 @@
-import Picker from '/static/emoji-picker-picker.js'
-import Database from '/static/emoji-picker-database.js'
+import Picker from './emoji-picker-picker.js'
+import Database from './emoji-picker-database.js'
 export { Picker, Database }

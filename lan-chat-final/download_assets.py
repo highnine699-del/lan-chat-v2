@@ -28,14 +28,26 @@ with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
             out.write(content)
         print(f"  Saved {dst} ({len(content):,} bytes)")
 
-# Patch index.js to use local relative paths
+# Patch emoji-picker.js (entry point) — use relative imports so the module
+# works regardless of deployment path, CDN prefix, or Flask static URL config.
 idx = os.path.join(OUT_DIR, "emoji-picker.js")
 with open(idx, "r", encoding="utf-8") as f:
     src = f.read()
-src = src.replace("'./picker.js'", "'/static/emoji-picker-picker.js'")
-src = src.replace("'./database.js'", "'/static/emoji-picker-database.js'")
+src = src.replace("'./picker.js'",   "'./emoji-picker-picker.js'")
+src = src.replace("'./database.js'", "'./emoji-picker-database.js'")
 with open(idx, "w", encoding="utf-8") as f:
     f.write(src)
-print("  Patched emoji-picker.js with local paths")
+print("  Patched emoji-picker.js with relative paths")
+
+# Patch emoji-picker-picker.js — it also imports ./database.js internally.
+# Use relative path so it resolves correctly from any deployment location.
+picker = os.path.join(OUT_DIR, "emoji-picker-picker.js")
+with open(picker, "r", encoding="utf-8") as f:
+    src = f.read()
+src = src.replace("'./database.js'", "'./emoji-picker-database.js'")
+src = src.replace('"./database.js"', '"./emoji-picker-database.js"')
+with open(picker, "w", encoding="utf-8") as f:
+    f.write(src)
+print("  Patched emoji-picker-picker.js with relative path")
 
 print("Done.")
