@@ -244,19 +244,21 @@ def create_room(
         room_id = _make_room_id()
 
     room = {
-        'id':           room_id,
-        'name':         name[:32],
-        'visibility':   visibility,
-        'password':     password or None,
-        'creator_sid':  creator_sid,
-        'members':      set(),
-        'admins':       {creator_sid},
-        'created_at':   time.time(),
-        'ttl':          ttl,
-        'messages':     deque(maxlen=ROOM_HISTORY_SIZE),
-        'is_frozen':    False,
-        'delete_timer': None,
-        'session_key':  None,   # AES-GCM JWK set by creator, relayed to joiners
+        'id':              room_id,
+        'name':            name[:32],
+        'visibility':      visibility,
+        'password':        password or None,
+        'require_approval': False,          # set to True by creator after creation
+        'pending_knocks':  {},              # sid -> display (waiting for admin approval)
+        'creator_sid':     creator_sid,
+        'members':         set(),
+        'admins':          {creator_sid},
+        'created_at':      time.time(),
+        'ttl':             ttl,
+        'messages':        deque(maxlen=ROOM_HISTORY_SIZE),
+        'is_frozen':       False,
+        'delete_timer':    None,
+        'session_key':     None,   # AES-GCM JWK set by creator, relayed to joiners
     }
     rooms[room_id] = room
     analytics['rooms_created'] += 1

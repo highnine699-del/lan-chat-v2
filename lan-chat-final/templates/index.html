@@ -2040,6 +2040,18 @@
           }
         }
 
+        // Update header for the room
+        document.getElementById('header-name').textContent = data.name;
+        document.getElementById('header-status').textContent =
+          `${(data.members || []).length} members · 🔒 encrypted`;
+        const av = document.getElementById('header-avatar');
+        av.style.background = '#1a3a5c';
+        av.style.fontSize = '18px';
+        av.textContent = '🏠';
+        // Show call buttons in rooms
+        const ha = document.querySelector('.header-actions');
+        if (ha) ha.style.display = 'flex';
+
         // Load room history into the chat
         if (data.history && data.history.length) {
           data.history.forEach(m => addMessage(m, false));
@@ -2113,6 +2125,76 @@
           showToast('⚠️ You were removed from the room by an admin');
           switchChat('global');
         }
+      });
+
+      // ── Room call events ──────────────────────────────────────────────────
+
+      s.on('room:incoming_call', data => {
+        // Another room member started a call — show a join notification
+        const callType = data.call_type === 'video' ? '📹 video' : '📞 voice';
+        notifyIncomingCall(data.from, data.call_type);
+
+        // Show a persistent toast with Accept button
+        const toastEl = document.getElementById('toast');
+        toastEl.innerHTML = '';
+        const msg = document.createElement('span');
+        msg.textContent = `${data.from} started a ${callType} call in "${data.room_name}" `;
+        const btn = document.createElement('button');
+        btn.textContent = 'Join';
+        btn.style.cssText = 'margin-left:8px;padding:3px 10px;border-radius:8px;' +
+          'background:var(--accent);color:#0a0e13;border:none;cursor:pointer;font-weight:700;';
+        btn.onclick = () => {
+          toastEl.classList.remove('show');
+          // Join the call by initiating a WebRTC connection back to the caller
+          state.callTarget = data.from;
+          state.callType = data.call_type;
+          startCall(data.call_type);
+        };
+        toastEl.appendChild(msg);
+        toastEl.appendChild(btn);
+        toastEl.classList.add('show');
+        // Auto-dismiss after 30s
+        setTimeout(() => toastEl.classList.remove('show'), 30000);
+      });
+
+      // ── Room knock events ─────────────────────────────────────────────────
+
+      s.on('room:knock', data => {
+        // Admin receives a knock — show approve/deny toast
+        const toastEl = document.getElementById('toast');
+        toastEl.innerHTML = '';
+        const msg = document.createElement('span');
+        msg.textContent = `${data.display} wants to join `;
+        const approveBtn = document.createElement('button');
+        approveBtn.textContent = '✓ Approve';
+        approveBtn.style.cssText = 'margin-left:6px;padding:3px 10px;border-radius:8px;' +
+          'background:var(--accent);color:#0a0e13;border:none;cursor:pointer;font-weight:700;';
+        approveBtn.onclick = () => {
+          state.socket.emit('room:knock_approve', { room_id: data.room_id, sid: data.sid });
+          toastEl.classList.remove('show');
+        };
+        const denyBtn = document.createElement('button');
+        denyBtn.textContent = '✕ Deny';
+        denyBtn.style.cssText = 'margin-left:4px;padding:3px 10px;border-radius:8px;' +
+          'background:rgba(255,68,85,0.2);color:var(--danger);border:1px solid var(--danger);' +
+          'cursor:pointer;font-weight:700;';
+        denyBtn.onclick = () => {
+          state.socket.emit('room:knock_deny', { room_id: data.room_id, sid: data.sid });
+          toastEl.classList.remove('show');
+        };
+        toastEl.appendChild(msg);
+        toastEl.appendChild(approveBtn);
+        toastEl.appendChild(denyBtn);
+        toastEl.classList.add('show');
+        setTimeout(() => toastEl.classList.remove('show'), 60000);
+      });
+
+      s.on('room:knock_pending', data => {
+        showToast(`⏳ Waiting for admin approval to join "${data.name}"…`);
+      });
+
+      s.on('room:knock_denied', data => {
+        showToast('❌ Your request to join the room was denied.');
       });
 
       // Request notification permission
@@ -2770,14 +2852,27 @@
       const item = document.getElementById('chat-item-' + chatId);
       if (item) item.classList.add('active');
 
+      // Determine context: global, room, or DM
+      const isGlobal = chatId === 'global';
+      const isRoom = !!state.currentRoom;
+      const isDM = !isGlobal && !isRoom;
+
+      // Show call buttons for rooms and DMs, hide for global
+      const headerActions = document.querySelector('.header-actions');
+      if (headerActions) {
+        headerActions.style.display = isGlobal ? 'none' : 'flex';
+      }
+
       // Update header
-      if (chatId === 'global') {
+      if (isGlobal) {
         document.getElementById('header-name').textContent = 'Global Chat';
         document.getElementById('header-status').textContent = state.users.length + ' members online';
         const av = document.getElementById('header-avatar');
         av.style.background = '#1a4a3a';
         av.style.fontSize = '20px';
         av.textContent = '🌍';
+      } else if (isRoom) {
+        // Room header is set by room:joined — just keep it
       } else {
         const user = state.users.find(u => u.display === chatId);
         document.getElementById('header-name').textContent = chatId;
@@ -2971,11 +3066,14 @@
       if (!name) { document.getElementById('rm-name').focus(); return; }
       const password = document.getElementById('rm-password').value.trim();
       const ttl = document.getElementById('rm-ttl').value;
+      const requireApproval = _roomVis === 'private' &&
+        document.getElementById('rm-require-approval').checked;
       state.socket.emit('room:create', {
         name,
         visibility: _roomVis,
         password: _roomVis === 'private' ? password : '',
         ttl,
+        require_approval: requireApproval,
       });
       closeRoomModal();
     }
@@ -3084,8 +3182,8 @@
         return;
       }
 
-      if (state.currentChat === 'global') {
-        alert('Voice/video calls are only available in private chats. Select a person first.');
+      if (state.currentChat === 'global' && !state.currentRoom) {
+        alert('Voice/video calls are only available in rooms or private chats.');
         return;
       }
 
@@ -3095,6 +3193,52 @@
         return;
       }
 
+      // ── Room call: broadcast invite to all members, then call each who accepts ──
+      if (state.currentRoom) {
+        state.callType = type;
+        state.callState = 'calling';
+        state.callTarget = null;   // room call has no single target
+
+        // Notify all room members
+        state.socket.emit('room:call', {
+          room_id: state.currentRoom,
+          call_type: type,
+        });
+
+        // Show overlay in "waiting for members" state
+        const overlay = document.getElementById('call-overlay');
+        overlay.classList.add('active');
+        document.getElementById('call-avatar').textContent = '🏠';
+        document.getElementById('call-avatar').style.background = '#1a3a5c';
+        document.getElementById('call-name').textContent =
+          document.getElementById('header-name').textContent;
+        document.getElementById('call-status').textContent =
+          type === 'video' ? '📹 Room video call — waiting for members…'
+            : '📞 Room voice call — waiting for members…';
+        document.getElementById('call-action-buttons').style.display = 'none';
+        document.getElementById('call-control-buttons').style.display = 'flex';
+        const isVideo = type === 'video';
+        document.getElementById('call-video-pip').style.display = isVideo ? 'block' : 'none';
+        document.getElementById('cam-btn').style.display = isVideo ? 'flex' : 'none';
+
+        // Acquire local media
+        try {
+          const constraints = isVideo
+            ? { audio: true, video: { width: { ideal: 1280 }, height: { ideal: 720 } } }
+            : { audio: true, video: false };
+          state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+          if (isVideo) {
+            document.getElementById('local-video').srcObject = state.localStream;
+          }
+        } catch (err) {
+          console.error('[Call] Media error:', err);
+          alert('⚠️ Could not access microphone/camera: ' + err.message);
+          endCall();
+        }
+        return;
+      }
+
+      // ── DM call (existing logic) ──────────────────────────────────────────
       state.callTarget = state.currentChat;
       state.callType = type;
       state.callState = 'calling';
@@ -3934,6 +4078,13 @@
             onkeydown="if(event.key==='Enter')submitCreateRoom()" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);
                    border-radius:8px;padding:10px 12px;color:var(--text-primary);font-size:14px;
                    outline:none;box-sizing:border-box;" />
+          <!-- Require approval toggle (private rooms only) -->
+          <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;
+                        color:var(--text-secondary);font-size:13px;">
+            <input type="checkbox" id="rm-require-approval"
+              style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;" />
+            Require admin approval to join
+          </label>
         </div>
 
         <select id="rm-ttl" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);

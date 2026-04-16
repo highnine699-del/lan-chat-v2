@@ -419,6 +419,10 @@ def register_socket_handlers(socketio):
 
         room_id = room['id']
 
+        # Apply require_approval flag (private rooms only)
+        if visibility == 'private' and data.get('require_approval'):
+            room['require_approval'] = True
+
         # Creator joins immediately
         room['members'].add(sid)
         join_room(room_id)
@@ -541,6 +545,22 @@ def register_socket_handlers(socketio):
             emit('error', {'message': 'Wrong password.'})
             return
 
+        # If room requires approval, queue a knock instead of joining directly
+        if room.get('require_approval'):
+            room['pending_knocks'][sid] = user['display']
+            # Notify all admins
+            for admin_sid in room['admins']:
+                emit('room:knock', {
+                    'room_id':  room_id,
+                    'sid':      sid,
+                    'display':  user['display'],
+                }, to=admin_sid)
+            emit('room:knock_pending', {
+                'room_id': room_id,
+                'name':    room['name'],
+            })
+            return
+
         _do_join_room(sid, user, room)
 
     # ── room:leave ────────────────────────────────────────────────────────────
@@ -553,6 +573,99 @@ def register_socket_handlers(socketio):
             return
         _leave_current_room(sid, user)
         emit('room:left', {})
+
+    # ── room:set_approval ─────────────────────────────────────────────────────
+
+    @socketio.on('room:set_approval')
+    def handle_set_approval(data):
+        """Toggle require_approval on a private room. Admin only."""
+        if not isinstance(data, dict):
+            return
+        sid = current_sid()
+        if not sid:
+            return
+        room_id  = str(data.get('room_id', ''))
+        enabled  = bool(data.get('enabled', True))
+        if not is_room_admin(sid, room_id):
+            emit('error', {'message': 'Not authorised.'})
+            return
+        room = get_room(room_id)
+        if not room:
+            return
+        room['require_approval'] = enabled
+
+    # ── room:knock_approve / room:knock_deny ──────────────────────────────────
+
+    @socketio.on('room:knock_approve')
+    def handle_knock_approve(data):
+        """Admin approves a pending knock — the knocker joins the room."""
+        if not isinstance(data, dict):
+            return
+        sid  = current_sid()
+        user = current_user()
+        if not sid or not user:
+            return
+        room_id     = str(data.get('room_id', ''))
+        knocker_sid = str(data.get('sid', ''))
+        if not is_room_admin(sid, room_id):
+            return
+        room = get_room(room_id)
+        if not room or knocker_sid not in room.get('pending_knocks', {}):
+            return
+        room['pending_knocks'].pop(knocker_sid, None)
+        knocker = users.get(knocker_sid)
+        if knocker:
+            _do_join_room(knocker_sid, knocker, room)
+
+    @socketio.on('room:knock_deny')
+    def handle_knock_deny(data):
+        """Admin denies a pending knock."""
+        if not isinstance(data, dict):
+            return
+        sid = current_sid()
+        if not sid:
+            return
+        room_id     = str(data.get('room_id', ''))
+        knocker_sid = str(data.get('sid', ''))
+        if not is_room_admin(sid, room_id):
+            return
+        room = get_room(room_id)
+        if not room:
+            return
+        room['pending_knocks'].pop(knocker_sid, None)
+        emit('room:knock_denied', {'room_id': room_id}, to=knocker_sid)
+
+    # ── room:call ─────────────────────────────────────────────────────────────
+
+    @socketio.on('room:call')
+    def handle_room_call(data):
+        """
+        Broadcast a call invitation to all members of a room.
+        The caller's client then initiates individual WebRTC connections
+        to each member who accepts.
+        """
+        if not isinstance(data, dict):
+            return
+        user = current_user()
+        sid  = current_sid()
+        if not user or not sid:
+            return
+        room_id   = str(data.get('room_id', ''))
+        call_type = str(data.get('call_type', 'voice'))
+        if call_type not in ('voice', 'video'):
+            call_type = 'voice'
+        room = get_room(room_id)
+        if not room or sid not in room['members']:
+            return
+        # Notify every other member
+        for member_sid in room['members']:
+            if member_sid != sid:
+                emit('room:incoming_call', {
+                    'room_id':   room_id,
+                    'room_name': room['name'],
+                    'from':      user['display'],
+                    'call_type': call_type,
+                }, to=member_sid)
 
     # ── room:list ─────────────────────────────────────────────────────────────
 
