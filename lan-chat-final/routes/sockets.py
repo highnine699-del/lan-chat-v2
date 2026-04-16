@@ -61,6 +61,13 @@ def register_socket_handlers(socketio):
     def system_msg(text: str) -> dict:
         return {'type': 'system', 'text': text, 'time': now_ms()}
 
+    def err(message: str, code: str = 'ERROR', context: dict | None = None) -> None:
+        """Emit a standardized error event."""
+        payload = {'message': message, 'code': code}
+        if context:
+            payload['context'] = context
+        emit('error', payload)
+
     def relay_to_target(event: str, payload: dict, target: str | None) -> None:
         """Emit to a named peer only if they are online."""
         if target and target in sid_map:
@@ -83,8 +90,15 @@ def register_socket_handlers(socketio):
         elif target in rooms:
             room = rooms[target]
             if room['is_frozen']:
-                emit('error', {'message': 'This room is frozen. No messages allowed.'})
+                emit('error', {
+                    'code':    'ROOM_FROZEN',
+                    'message': 'This room is frozen. No messages allowed.',
+                    'context': {'room_id': target},
+                })
                 return
+            # Assign per-room sequence number for ordering
+            room['seq'] = room.get('seq', 0) + 1
+            msg['seq'] = room['seq']
             room['messages'].append(msg)
             emit('new_message', msg, to=target)   # Socket.IO room broadcast
 

@@ -259,6 +259,7 @@ def create_room(
         'is_frozen':       False,
         'delete_timer':    None,
         'session_key':     None,   # AES-GCM JWK set by creator, relayed to joiners
+        'seq':             0,      # per-room message sequence counter
     }
     rooms[room_id] = room
     analytics['rooms_created'] += 1
@@ -464,10 +465,10 @@ def clean_room_name(raw) -> str | None:
 def start_cleanup_worker() -> None:
     """
     Background thread that:
-    - Removes empty rooms past their grace period (belt-and-suspenders
-      alongside the per-room threading.Timer)
+    - Removes empty rooms past their grace period
     - Prunes expired shadow mutes
     - Updates peak_users analytics
+    - Deletes upload files older than 24 hours
     Runs every 30 seconds.
     """
     def _loop():
@@ -491,6 +492,21 @@ def start_cleanup_worker() -> None:
                     age = now - room['created_at']
                     if age > ROOM_IDLE_GRACE_S:
                         rooms.pop(room_id, None)
+
+            # Auto-delete upload files older than 24 hours
+            try:
+                from config import UPLOAD_FOLDER
+                cutoff = now - 86400  # 24 hours
+                if os.path.isdir(UPLOAD_FOLDER):
+                    for fname in os.listdir(UPLOAD_FOLDER):
+                        fpath = os.path.join(UPLOAD_FOLDER, fname)
+                        try:
+                            if os.path.isfile(fpath) and os.path.getmtime(fpath) < cutoff:
+                                os.remove(fpath)
+                        except OSError:
+                            pass
+            except Exception:
+                pass
 
     t = threading.Thread(target=_loop, daemon=True)
     t.start()

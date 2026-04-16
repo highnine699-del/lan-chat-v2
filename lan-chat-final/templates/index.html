@@ -555,6 +555,48 @@
       width: fit-content;
     }
 
+    /* ── Message fade-in animation ─────────────────────────────────────────── */
+    @keyframes msgFadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(6px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .msg-wrapper {
+      animation: msgFadeIn 0.18s ease-out;
+    }
+
+    /* ── Jump-to-bottom button ─────────────────────────────────────────────── */
+    #jump-to-bottom {
+      display: none;
+      position: absolute;
+      bottom: 70px;
+      right: 20px;
+      background: var(--accent);
+      color: #0a0e13;
+      border: none;
+      border-radius: 50%;
+      width: 36px;
+      height: 36px;
+      font-size: 16px;
+      cursor: pointer;
+      box-shadow: var(--neon-glow);
+      z-index: 20;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.2s;
+    }
+
+    #jump-to-bottom.visible {
+      display: flex;
+    }
+
     /* TYPING INDICATOR */
     #typing-indicator {
       padding: 4px 8%;
@@ -1407,7 +1449,8 @@
           </button>
         </div>
 
-        <div id="messages"></div>
+        <div id="messages" style="position:relative;"></div>
+        <button id="jump-to-bottom" onclick="scrollToBottom()" title="Jump to latest">↓</button>
         <div id="typing-indicator"></div>
 
         <div class="input-area" id="input-area">
@@ -2110,7 +2153,8 @@
 
       // ── Server error messages ─────────────────────────────────────────────
       s.on('error', data => {
-        showToast('⚠️ ' + (data.message || 'An error occurred'));
+        const code = data.code ? `[${data.code}] ` : '';
+        showToast('⚠️ ' + code + (data.message || 'An error occurred'));
       });
 
       // ── Presence updates ──────────────────────────────────────────────────
@@ -2669,9 +2713,14 @@
           : (msg.from === state.display ? msg.to : msg.from);
 
       if (!state.chatMessages[chatId]) state.chatMessages[chatId] = [];
-      // Insert in timestamp order to handle out-of-order delivery
+      // Insert in sequence/timestamp order to handle out-of-order delivery
       const arr = state.chatMessages[chatId];
-      const insertAt = arr.findIndex(m => m.time > msg.time);
+      // Use seq for room messages (more reliable), time for others
+      const msgOrder = msg.seq !== undefined ? msg.seq : msg.time;
+      const insertAt = arr.findIndex(m => {
+        const mOrder = m.seq !== undefined ? m.seq : m.time;
+        return mOrder > msgOrder;
+      });
       if (insertAt === -1) {
         arr.push(msg);
       } else {
@@ -2862,8 +2911,16 @@
 
     function scrollToBottom() {
       const el = document.getElementById('messages');
-      el.scrollTop = el.scrollHeight;
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      document.getElementById('jump-to-bottom').classList.remove('visible');
     }
+
+    // Show jump-to-bottom button when user scrolls up
+    document.getElementById('messages').addEventListener('scroll', function () {
+      const btn = document.getElementById('jump-to-bottom');
+      const distFromBottom = this.scrollHeight - this.scrollTop - this.clientHeight;
+      btn.classList.toggle('visible', distFromBottom > 150);
+    });
 
     function _updateMsgStatus(msgId, tick, newId) {
       const el = document.getElementById('status-' + msgId);
