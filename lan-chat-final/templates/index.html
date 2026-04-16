@@ -1401,23 +1401,6 @@
             Key: <code id="room-key-fingerprint"
               style="font-family:monospace;color:var(--text-secondary);font-size:11px;">—</code>
           </span>
-          <button onclick="toggleDebugPanel()" style="margin-left:auto;background:none;border:1px solid var(--border);
-                   color:var(--text-muted);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">
-            🛠 Dev
-          </button>
-        </div>
-
-        <!-- Debug panel — hidden by default, toggle with Dev button -->
-        <div id="debug-panel" style="display:none;padding:8px 16px;background:#0a0e13;
-             border-bottom:1px solid var(--border);font-size:11px;font-family:monospace;
-             color:var(--text-secondary);flex-shrink:0;">
-          <strong style="color:var(--accent);">🛠 DEBUG</strong>
-          &nbsp;|&nbsp; Room key: <span id="dbg-key">—</span>
-          &nbsp;|&nbsp; Pending: <span id="dbg-pending">0</span>
-          &nbsp;|&nbsp; Socket: <span id="dbg-socket">—</span>
-          &nbsp;|&nbsp; Msg queue: <span id="dbg-queue">0</span>
-          <button onclick="refreshDebug()" style="margin-left:8px;background:none;border:1px solid var(--border);
-                   color:var(--text-muted);border-radius:4px;padding:1px 6px;cursor:pointer;">↻</button>
         </div>
 
         <div id="messages"></div>
@@ -1591,7 +1574,70 @@
   <!-- TOAST -->
   <div id="toast"></div>
 
+  <!-- DEBUG PANEL — only visible in dev mode, fixed bottom-right corner -->
+  <div id="debugPanel" style="display:none;position:fixed;bottom:10px;right:10px;width:260px;
+       background:#0f172a;color:#e2e8f0;font-size:12px;font-family:monospace;
+       border-radius:10px;padding:12px 14px;z-index:9999;
+       box-shadow:0 0 20px rgba(0,0,0,0.6);border:1px solid rgba(0,255,136,0.2);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <strong style="color:#00ff88;">🛠 DEBUG</strong>
+      <button onclick="document.getElementById('debugPanel').style.display='none'"
+        style="background:none;border:none;color:#64748b;cursor:pointer;font-size:14px;">✕</button>
+    </div>
+    <div id="dbg-conn" style="margin:3px 0;"></div>
+    <div id="dbg-user" style="margin:3px 0;"></div>
+    <div id="dbg-room" style="margin:3px 0;"></div>
+    <div id="dbg-key" style="margin:3px 0;"></div>
+    <div id="dbg-queue" style="margin:3px 0;"></div>
+    <div id="dbg-decrypt" style="margin:3px 0;"></div>
+    <div id="dbg-socket" style="margin:3px 0;"></div>
+  </div>
+
   <script>
+    // ─── DEV MODE ─────────────────────────────────────────────
+    // Active on localhost automatically, or manually via:
+    //   localStorage.setItem("dev_mode", "true")  → reload
+    //   localStorage.removeItem("dev_mode")        → reload to disable
+    const DEV_MODE =
+      location.hostname === 'localhost' ||
+      location.hostname === '127.0.0.1' ||
+      localStorage.getItem('dev_mode') === 'true';
+
+    const debugState = {
+      connected: false,
+      userId: null,
+      roomId: null,
+      hasKey: false,
+      queueSize: 0,
+      lastDecrypt: 'N/A',
+    };
+
+    function updateDebugPanel() {
+      if (!DEV_MODE) return;
+      const panel = document.getElementById('debugPanel');
+      if (!panel) return;
+      panel.style.display = 'block';
+      document.getElementById('dbg-conn').textContent =
+        'Connection: ' + (debugState.connected ? '✅ Connected' : '❌ Disconnected');
+      document.getElementById('dbg-user').textContent =
+        'User: ' + (debugState.userId || 'N/A');
+      document.getElementById('dbg-room').textContent =
+        'Room: ' + (debugState.roomId || 'None');
+      document.getElementById('dbg-key').textContent =
+        'Room Key: ' + (debugState.hasKey ? '✅ Loaded' : '❌ Missing');
+      document.getElementById('dbg-queue').textContent =
+        'Queue: ' + debugState.queueSize + ' pending';
+      document.getElementById('dbg-decrypt').textContent =
+        'Last Decrypt: ' + debugState.lastDecrypt;
+      document.getElementById('dbg-socket').textContent =
+        'Socket: ' + (state.socket
+          ? (state.socket.connected ? '🟢 connected' : '🔴 disconnected')
+          : '—');
+    }
+
+    // Auto-refresh every second in dev mode
+    if (DEV_MODE) setInterval(updateDebugPanel, 1000);
+
     // ─── STATE ────────────────────────────────────────────────
     const state = {
       socket: null,
@@ -1747,6 +1793,11 @@
         );
         state.roomKeys[roomId] = key;
         console.log(`[E2E] Room key imported for ${roomId}`);
+        // Update debug state
+        debugState.hasKey = true;
+        debugState.roomId = roomId;
+        debugState.queueSize = (state.pendingDecrypt[roomId] || []).length;
+        updateDebugPanel();
 
         // Compute and display fingerprint for manual verification
         try {
@@ -1871,6 +1922,9 @@
 
       s.on('connect', () => {
         setConnBanner('', '', '');   // hide banner — connected
+        debugState.connected = true;
+        debugState.userId = state.display || state.username;
+        updateDebugPanel();
         // Re-join with identity on every connect (handles reconnects too)
         s.emit('join', {
           username: state.username,
@@ -1891,6 +1945,8 @@
       });
 
       s.on('reconnecting', (attempt) => {
+        debugState.connected = false;
+        updateDebugPanel();
         setConnBanner(`🟡 Reconnecting… (${attempt}/10)`, '#1a1500', '#f0b429');
       });
 
@@ -1925,6 +1981,9 @@
         const color = stringToColor(state.username);
         document.getElementById('my-avatar').style.background = color;
         document.getElementById('my-avatar').textContent = state.username[0].toUpperCase();
+        // Update debug state with confirmed identity
+        debugState.userId = state.display;
+        updateDebugPanel();
       });
 
       // Receive a peer's public key
@@ -2543,6 +2602,8 @@
           // Key available — decrypt now
           const plaintext = await E2E.decryptRoom(msg.encrypted, msg.to);
           msg = { ...msg, text: plaintext !== null ? plaintext : '🔒 [decryption failed]' };
+          debugState.lastDecrypt = plaintext !== null ? '✅ Success' : '❌ Failed';
+          updateDebugPanel();
         } else if (isRoomTarget && !isRoomMsg) {
           // Room message but key not yet available — buffer it
           if (!state.pendingDecrypt[msg.to]) state.pendingDecrypt[msg.to] = [];
@@ -3200,32 +3261,25 @@
       document.getElementById('room-id-display').textContent = roomId;
       document.getElementById('room-key-fingerprint').textContent = '—';
       banner.style.display = 'flex';
+      // Update debug state
+      debugState.roomId = roomId;
+      debugState.hasKey = !!state.roomKeys[roomId];
+      updateDebugPanel();
     }
 
     function hideRoomIdBanner() {
       document.getElementById('room-id-banner').style.display = 'none';
       document.getElementById('room-id-display').textContent = '';
       document.getElementById('room-key-fingerprint').textContent = '—';
-      document.getElementById('debug-panel').style.display = 'none';
+      // Update debug state
+      debugState.roomId = null;
+      debugState.hasKey = false;
+      updateDebugPanel();
     }
 
-    function toggleDebugPanel() {
-      const p = document.getElementById('debug-panel');
-      p.style.display = p.style.display === 'none' ? 'block' : 'none';
-      if (p.style.display === 'block') refreshDebug();
-    }
-
-    function refreshDebug() {
-      const roomId = state.currentRoom;
-      document.getElementById('dbg-key').textContent =
-        roomId && state.roomKeys[roomId] ? '✅ present' : '❌ missing';
-      document.getElementById('dbg-pending').textContent =
-        roomId ? (state.pendingDecrypt[roomId] || []).length : 0;
-      document.getElementById('dbg-socket').textContent =
-        state.socket ? (state.socket.connected ? '🟢 connected' : '🔴 disconnected') : '—';
-      document.getElementById('dbg-queue').textContent =
-        Object.values(state.pendingDecrypt).reduce((a, b) => a + b.length, 0);
-    }
+    // Legacy stubs — kept so nothing breaks if called
+    function toggleDebugPanel() { if (DEV_MODE) updateDebugPanel(); }
+    function refreshDebug() { updateDebugPanel(); }
 
     function copyRoomId() {
       const roomId = document.getElementById('room-id-display').textContent;
