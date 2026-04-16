@@ -27,7 +27,7 @@ from config import (
     MAX_MESSAGE_LEN, MAX_SIGNAL_BYTES, UPLOAD_FOLDER,
     HIDE_VOTE_THRESHOLD, SPAM_COOLDOWN_S,
     MAX_ROOM_NAME_LEN, EPHEMERAL_TTLS, JOIN_TOKEN_TTL_S,
-    SERVER_PASSWORD, MAX_CONNECTIONS_PER_IP,
+    ADMIN_PASSWORD,
 )
 from state import (
     # core state
@@ -127,15 +127,11 @@ def register_socket_handlers(socketio):
         if not sid:
             return
 
-        # ── Server password check ─────────────────────────────────────────────
-        if SERVER_PASSWORD:
-            client_pw = str(data.get('server_password', ''))
-            if client_pw != SERVER_PASSWORD:
-                emit('error', {
-                    'code':    'AUTH_FAILED',
-                    'message': 'Wrong server password.',
-                })
-                return
+        # ── Admin password check ──────────────────────────────────────────────
+        # Wrong or missing password = regular user (not blocked).
+        # Correct ADMIN_PASSWORD = session gets is_admin flag.
+        client_pw = str(data.get('server_password', ''))
+        is_server_admin = bool(ADMIN_PASSWORD and client_pw == ADMIN_PASSWORD)
 
         # ── IP connection limit ───────────────────────────────────────────────
         client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr or '').split(',')[0].strip()
@@ -183,16 +179,17 @@ def register_socket_handlers(socketio):
         color    = next_color()
 
         users[sid] = {
-            'username':  username,
-            'tag':       tag,
-            'display':   display,
-            'uid':       uid,
-            'color':     color,
-            'joined_at': time.time(),
-            'msg_count': 0,
-            'room_id':   None,
-            'presence':  'active',
-            'persona':   None,
+            'username':        username,
+            'tag':             tag,
+            'display':         display,
+            'uid':             uid,
+            'color':           color,
+            'joined_at':       time.time(),
+            'msg_count':       0,
+            'room_id':         None,
+            'presence':        'active',
+            'persona':         None,
+            'is_server_admin': is_server_admin,
         }
         sid_map[display] = sid
         upload_counts[sid] = 0
@@ -207,12 +204,13 @@ def register_socket_handlers(socketio):
             analytics['peak_users'] = len(users)
 
         emit('joined', {
-            'username':   username,
-            'tag':        tag,
-            'display':    display,
-            'color':      color,
-            'uid':        uid,
-            'reputation': reputation_label(0),
+            'username':        username,
+            'tag':             tag,
+            'display':         display,
+            'color':           color,
+            'uid':             uid,
+            'reputation':      reputation_label(0),
+            'is_server_admin': is_server_admin,
         })
 
         other_keys = dict(public_keys)
@@ -307,6 +305,15 @@ def register_socket_handlers(socketio):
             if isinstance(enc, str) and enc:
                 msg['encrypted'] = enc
 
+        # Pass through reply_to if present (validated as a dict with msg_id)
+        reply_to = data.get('reply_to')
+        if isinstance(reply_to, dict) and isinstance(reply_to.get('msg_id'), str):
+            msg['reply_to'] = {
+                'msg_id': str(reply_to['msg_id'])[:32],
+                'from':   str(reply_to.get('from', ''))[:64],
+                'text':   str(reply_to.get('text', ''))[:200],
+            }
+
         dispatch_message(msg, target)
 
     # ── send_file ─────────────────────────────────────────────────────────────
@@ -358,6 +365,116 @@ def register_socket_handlers(socketio):
             'msg_id':     msg_id,
         }
         dispatch_message(msg, target)
+
+    # ── message:edit ──────────────────────────────────────────────────────────
+
+    @socketio.on('message:edit')
+    def handle_message_edit(data):
+        """
+        Edit a message. Only the original sender or a room admin may edit.
+        Broadcasts message:edited to the relevant target (room or DM parties).
+        """
+        if not isinstance(data, dict):
+            return
+        user = current_user()
+        sid  = current_sid()
+        if not user or not sid:
+            return
+
+        msg_id  = str(data.get('msg_id', ''))[:32]
+        new_text = str(data.get('text', '')).strip()[:MAX_MESSAGE_LEN]
+        target  = str(data.get('to', ''))
+
+        if not msg_id or not new_text or not target:
+            return
+
+        # Authorisation: sender or room admin
+        is_admin = target in rooms and is_room_admin(sid, target)
+        if not is_admin and data.get('from') != user['display']:
+            emit('error', {'code': 'FORBIDDEN', 'message': 'Cannot edit this message.'})
+            return
+
+        payload = {
+            'msg_id':  msg_id,
+            'text':    new_text,
+            'edited':  True,
+            'to':      target,
+        }
+        if 'encrypted' in data:
+            enc = data['encrypted']
+            if isinstance(enc, str) and enc:
+                payload['encrypted'] = enc
+
+        if target == 'global':
+            emit('message:edited', payload, broadcast=True)
+        elif target in rooms:
+            emit('message:edited', payload, to=target)
+        elif target in sid_map:
+            emit('message:edited', payload, to=sid_map[target])
+            emit('message:edited', payload, to=sid)
+
+    # ── message:delete ────────────────────────────────────────────────────────
+
+    @socketio.on('message:delete')
+    def handle_message_delete(data):
+        """
+        Soft-delete a message. Only the original sender or a room admin may delete.
+        Broadcasts message:deleted to the relevant target.
+        """
+        if not isinstance(data, dict):
+            return
+        user = current_user()
+        sid  = current_sid()
+        if not user or not sid:
+            return
+
+        msg_id = str(data.get('msg_id', ''))[:32]
+        target = str(data.get('to', ''))
+
+        if not msg_id or not target:
+            return
+
+        is_admin = target in rooms and is_room_admin(sid, target)
+        if not is_admin and data.get('from') != user['display']:
+            emit('error', {'code': 'FORBIDDEN', 'message': 'Cannot delete this message.'})
+            return
+
+        payload = {'msg_id': msg_id, 'to': target}
+
+        if target == 'global':
+            emit('message:deleted', payload, broadcast=True)
+        elif target in rooms:
+            emit('message:deleted', payload, to=target)
+        elif target in sid_map:
+            emit('message:deleted', payload, to=sid_map[target])
+            emit('message:deleted', payload, to=sid)
+
+    # ── message:seen ──────────────────────────────────────────────────────────
+
+    @socketio.on('message:seen')
+    def handle_message_seen(data):
+        """
+        Mark messages as seen. Client sends when the user opens a chat.
+        Relays message:seen to the original sender so they can update their tick.
+        """
+        if not isinstance(data, dict):
+            return
+        user = current_user()
+        if not user:
+            return
+
+        msg_ids = data.get('msg_ids', [])
+        sender  = str(data.get('sender', ''))
+
+        if not isinstance(msg_ids, list) or not sender:
+            return
+
+        # Relay to the sender so they can update their ✅✅ ticks
+        if sender in sid_map:
+            emit('message:seen', {
+                'msg_ids': [str(m)[:32] for m in msg_ids[:50]],
+                'by':      user['display'],
+            }, to=sid_map[sender])
 
     # ── typing indicators ─────────────────────────────────────────────────────
 
@@ -1010,12 +1127,15 @@ def register_socket_handlers(socketio):
             if uid and uid_sessions.get(uid) == sid:
                 uid_sessions.pop(uid, None)
 
-            # Clean up IP tracking
-            client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr or '').split(',')[0].strip()
-            if client_ip in ip_connections:
-                ip_connections[client_ip].discard(sid)
-                if not ip_connections[client_ip]:
-                    del ip_connections[client_ip]
+            # Clean up IP tracking (best-effort — request context may be absent in tests)
+            try:
+                client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr or '').split(',')[0].strip()
+                if client_ip in ip_connections:
+                    ip_connections[client_ip].discard(sid)
+                    if not ip_connections[client_ip]:
+                        del ip_connections[client_ip]
+            except RuntimeError:
+                pass  # no request context (e.g. test environment)
 
             # Capture room_id BEFORE popping user_state so _leave_current_room_by_sid
             # can still find it (user_state is the source of truth for room_id here)

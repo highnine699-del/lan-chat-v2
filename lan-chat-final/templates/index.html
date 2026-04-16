@@ -1178,6 +1178,108 @@
       margin-left: 4px;
     }
 
+    /* ── Reply-to preview ──────────────────────────────────────────────── */
+    .reply-preview {
+      background: rgba(0, 255, 136, 0.07);
+      border-left: 3px solid var(--accent);
+      border-radius: 4px;
+      padding: 4px 8px;
+      margin-bottom: 4px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      max-width: 100%;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .reply-preview strong {
+      color: var(--accent);
+      margin-right: 4px;
+    }
+
+    /* ── Reply bar (above input) ───────────────────────────────────────── */
+    #reply-bar {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: var(--bg-tertiary);
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    #reply-bar.active {
+      display: flex;
+    }
+
+    #reply-bar-text {
+      flex: 1;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    #reply-bar-cancel {
+      cursor: pointer;
+      color: var(--danger);
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    /* ── Message action buttons (edit/delete/reply) ────────────────────── */
+    .msg-actions {
+      display: none;
+      gap: 4px;
+      margin-top: 2px;
+    }
+
+    .msg-wrapper:hover .msg-actions {
+      display: flex;
+    }
+
+    .msg-action-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 13px;
+      padding: 2px 5px;
+      border-radius: 4px;
+      color: var(--text-muted);
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .msg-action-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-primary);
+    }
+
+    /* ── Edited label ──────────────────────────────────────────────────── */
+    .edited-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-style: italic;
+      margin-left: 4px;
+    }
+
+    /* ── Sound mute toggle ─────────────────────────────────────────────── */
+    #sound-mute-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 18px;
+      padding: 4px 8px;
+      color: var(--text-secondary);
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+
+    #sound-mute-btn:hover {
+      background: rgba(255, 255, 255, 0.07);
+    }
+
     /* ── Toast notification ────────────────────────────────────────────── */
     #toast {
       position: fixed;
@@ -1328,7 +1430,15 @@
         autocomplete="off" />
       <input type="text" id="password-input" class="login-input" placeholder="Password (optional, for identity)"
         autocomplete="off" />
+      <!-- Admin password — hidden by default, revealed by clicking the tiny link below -->
+      <input type="password" id="admin-password-input" class="login-input" placeholder="Admin password"
+        autocomplete="off" style="display:none;margin-bottom:4px;" />
       <button class="login-btn" onclick="doLogin()">Start Chatting</button>
+      <!-- Invisible admin trigger — no label, no hint, just a tiny dot -->
+      <div style="text-align:right;margin-top:6px;">
+        <span id="admin-toggle" onclick="toggleAdminField()"
+          style="font-size:10px;color:var(--bg-tertiary);cursor:pointer;user-select:none;" title="">·</span>
+      </div>
     </div>
   </div>
 
@@ -1409,6 +1519,7 @@
             <div class="chat-header-status" id="header-status">Everyone online</div>
           </div>
           <div class="header-actions">
+            <button id="sound-mute-btn" onclick="toggleSoundMute()" title="Toggle notification sounds">🔔</button>
             <button class="icon-btn neon-icon" onclick="startCall('voice')" title="Voice call">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                 stroke-linecap="round" stroke-linejoin="round">
@@ -1452,6 +1563,13 @@
         <div id="messages" style="position:relative;"></div>
         <button id="jump-to-bottom" onclick="scrollToBottom()" title="Jump to latest">↓</button>
         <div id="typing-indicator"></div>
+
+        <!-- Reply bar — shown when replying to a message -->
+        <div id="reply-bar">
+          <span style="color:var(--accent);">↩ Replying to</span>
+          <span id="reply-bar-text"></span>
+          <span id="reply-bar-cancel" onclick="cancelReply()" title="Cancel reply">✕</span>
+        </div>
 
         <div class="input-area" id="input-area">
           <button class="icon-btn" onclick="toggleEmoji()" title="Emoji" id="emoji-btn">😊</button>
@@ -1721,12 +1839,18 @@
       sharedSecrets: {},
       roomKeys: {},        // room_id -> CryptoKey (AES-GCM, session-only)
       currentRoomName: '', // display name of the active room (for header fallback)
+      isServerAdmin: false, // set to true if admin password was correct on login
       // ── Reliability ─────────────────────────────────────────────────
       pendingDecrypt: {},  // room_id -> [msg, ...] buffered until key arrives
-      msgStatus: {},       // tempId -> 'sending'|'delivered'
+      msgStatus: {},       // tempId -> 'sending'|'delivered'|'seen'
       tempIdMap: {},       // tempId -> DOM element id (for status updates)
       offlineQueue: [],    // messages queued while disconnected
       preJoinQueue: [],    // messages that arrived before identity was confirmed
+      // ── Reply-to ────────────────────────────────────────────────────
+      replyTo: null,       // {msg_id, from, text} — message being replied to
+      // ── Settings ────────────────────────────────────────────────────
+      soundMuted: false,   // mute notification sounds
+      serverPassword: '',  // server join password (if required)
     };
 
     // ─── E2E ENCRYPTION ───────────────────────────────────────────────
@@ -1866,8 +1990,25 @@
         // Flush any messages that arrived before the key was ready
         const pending = state.pendingDecrypt[roomId] || [];
         delete state.pendingDecrypt[roomId];
-        for (const msg of pending) {
-          await addMessage(msg, true);
+        if (pending.length) {
+          // Remove placeholder DOM elements and cached placeholder entries
+          const chatArr = state.chatMessages[roomId];
+          if (chatArr) {
+            // Strip out all _pending placeholders for this room
+            const toRemove = chatArr.filter(m => m._pending);
+            toRemove.forEach(m => {
+              if (m.msg_id) {
+                const el = document.querySelector(`[data-msg-id="${m.msg_id}"]`);
+                if (el) el.remove();
+              }
+            });
+            state.chatMessages[roomId] = chatArr.filter(m => !m._pending);
+          }
+          // Re-render each buffered message now that the key is available
+          for (const msg of pending) {
+            await addMessage(msg, true);
+          }
+          console.log(`[E2E] Flushed ${pending.length} buffered message(s) for room ${roomId}`);
         }
       },
 
@@ -1914,11 +2055,31 @@
       if (e.key === 'Enter') doLogin();
     });
 
+    function toggleAdminField() {
+      const f = document.getElementById('admin-password-input');
+      const t = document.getElementById('admin-toggle');
+      if (f.style.display === 'none') {
+        f.style.display = 'block';
+        f.focus();
+        t.style.color = 'var(--text-muted)';
+      } else {
+        f.style.display = 'none';
+        f.value = '';
+        t.style.color = 'var(--bg-tertiary)';
+      }
+    }
+
+    document.getElementById('admin-password-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') doLogin();
+      if (e.key === 'Escape') toggleAdminField();
+    });
+
     // ─── LOGIN ────────────────────────────────────────────────
     async function doLogin() {
       const name = document.getElementById('username-input').value.trim();
       if (!name) { alert('Please enter a name'); return; }
       state.username = name;
+      state.serverPassword = document.getElementById('admin-password-input').value;
 
       // Generate a session-only UID — never stored to disk or browser storage.
       // Tag will reset on page refresh (ephemeral by design).
@@ -1980,6 +2141,7 @@
           username: state.username,
           uid: state.uid,
           publicKey: state.myPublicKeyJwk,
+          server_password: state.serverPassword || '',
         });
         // Rejoin room on every connect cycle (disconnect resets _hasRejoined)
         if (state.currentRoom && !_hasRejoined) {
@@ -2040,6 +2202,7 @@
         // Server confirms identity with tag
         state.tag = data.tag;
         state.display = data.display;   // "username#tag"
+        state.isServerAdmin = !!data.is_server_admin;
         if (data.username !== state.username) {
           state.username = data.username;
         }
@@ -2047,6 +2210,11 @@
         const color = stringToColor(state.username);
         document.getElementById('my-avatar').style.background = color;
         document.getElementById('my-avatar').textContent = state.username[0].toUpperCase();
+        // Show subtle admin badge on avatar if admin
+        if (state.isServerAdmin) {
+          document.getElementById('my-avatar').title = '👑 Server Admin';
+          document.getElementById('my-avatar').style.boxShadow = '0 0 0 2px gold';
+        }
         // Update debug state with confirmed identity
         debugState.userId = state.display;
         updateDebugPanel();
@@ -2155,6 +2323,80 @@
         scrollToBottom();
       });
 
+      // ── Message edit / delete / seen ──────────────────────────────────────
+      s.on('message:edited', async data => {
+        const { msg_id, text, encrypted, to } = data;
+        // Update in chatMessages store
+        for (const arr of Object.values(state.chatMessages)) {
+          const m = arr.find(m => m.msg_id === msg_id);
+          if (m) {
+            if (encrypted) {
+              // Decrypt the new ciphertext
+              let plain = text;
+              if (to && state.roomKeys[to]) {
+                plain = await E2E.decryptRoom(encrypted, to) || '🔒 [decryption failed]';
+              } else if (to && to !== 'global') {
+                const peer = m.from === state.display ? to : m.from;
+                plain = await E2E.decrypt(encrypted, peer) || '🔒 [decryption failed]';
+              }
+              m.text = plain;
+            } else {
+              m.text = text;
+            }
+            m.edited = true;
+            break;
+          }
+        }
+        // Update DOM
+        const wrapper = document.querySelector(`[data-msg-id="${msg_id}"]`);
+        if (wrapper) {
+          const textEl = wrapper.querySelector('.bubble-text');
+          if (textEl) {
+            textEl.textContent = data._plaintext || text;
+            // Add edited label if not already there
+            if (!wrapper.querySelector('.edited-label')) {
+              const label = document.createElement('span');
+              label.className = 'edited-label';
+              label.textContent = ' (edited)';
+              textEl.appendChild(label);
+            }
+          }
+        }
+      });
+
+      s.on('message:deleted', data => {
+        const { msg_id } = data;
+        // Soft-delete in store
+        for (const arr of Object.values(state.chatMessages)) {
+          const m = arr.find(m => m.msg_id === msg_id);
+          if (m) { m.deleted = true; m.text = '🗑 This message was deleted'; break; }
+        }
+        // Update DOM
+        const wrapper = document.querySelector(`[data-msg-id="${msg_id}"]`);
+        if (wrapper) {
+          const textEl = wrapper.querySelector('.bubble-text');
+          if (textEl) {
+            textEl.textContent = '🗑 This message was deleted';
+            textEl.style.opacity = '0.5';
+            textEl.style.fontStyle = 'italic';
+          }
+          // Remove action buttons
+          wrapper.querySelectorAll('.msg-action-btn').forEach(b => b.remove());
+        }
+      });
+
+      s.on('message:seen', data => {
+        // data.msg_ids = array of msg_ids the peer has seen
+        // data.by = who saw them
+        if (!Array.isArray(data.msg_ids)) return;
+        data.msg_ids.forEach(id => {
+          if (state.msgStatus[id] !== 'seen') {
+            state.msgStatus[id] = 'seen';
+            _updateMsgStatus(id, '✅✅');
+          }
+        });
+      });
+
       s.on('typing', data => {
         if (data.username === state.display) return;   // ignore own typing echo
         const chatId = data.to === 'global' ? 'global' : data.username;
@@ -2180,6 +2422,18 @@
       s.on('error', data => {
         const code = data.code ? `[${data.code}] ` : '';
         showToast('⚠️ ' + code + (data.message || 'An error occurred'));
+
+        // Server password required — show the field and prompt user
+        if (data.code === 'AUTH_FAILED') {
+          // Disconnect and go back to login
+          s.disconnect();
+          document.getElementById('app').style.display = 'none';
+          document.getElementById('login-screen').style.display = 'flex';
+          const pwField = document.getElementById('server-password-input');
+          pwField.placeholder = 'Server password (required)';
+          pwField.focus();
+          alert('⚠️ Wrong server password. Please enter the correct password.');
+        }
       });
 
       // ── Presence updates ──────────────────────────────────────────────────
@@ -2560,7 +2814,7 @@
       // ── Sound ─────────────────────────────────────────────────────────────
       // Only play sound when the window is not focused; focused window already
       // has the message appearing in the chat area.
-      if (!windowFocused && soundType !== 'none') {
+      if (!windowFocused && soundType !== 'none' && !state.soundMuted) {
         if (soundType === 'ring') {
           playRingTone();
         } else {
@@ -2811,11 +3065,35 @@
         bubble.appendChild(senderRow);
       }
 
+      // Reply-to preview
+      if (msg.reply_to) {
+        const replyDiv = document.createElement('div');
+        replyDiv.className = 'reply-preview';
+        const orig = _findMsgById(msg.reply_to.msg_id);
+        const origText = orig ? (orig.text || '[file]') : (msg.reply_to.text || '…');
+        replyDiv.innerHTML = `<strong>${msg.reply_to.from || '?'}</strong>${_escapeHtml(origText.slice(0, 80))}`;
+        replyDiv.onclick = () => _scrollToMsg(msg.reply_to.msg_id);
+        bubble.appendChild(replyDiv);
+      }
+
       // Content
-      if (msg.type === 'text') {
+      if (msg.deleted) {
+        const text = document.createElement('div');
+        text.className = 'bubble-text';
+        text.textContent = '🗑 This message was deleted';
+        text.style.opacity = '0.5';
+        text.style.fontStyle = 'italic';
+        bubble.appendChild(text);
+      } else if (msg.type === 'text') {
         const text = document.createElement('div');
         text.className = 'bubble-text';
         text.textContent = msg.text;
+        if (msg.edited) {
+          const label = document.createElement('span');
+          label.className = 'edited-label';
+          label.textContent = ' (edited)';
+          text.appendChild(label);
+        }
         bubble.appendChild(text);
       } else if (msg.type === 'file') {
         const el = renderFileContent(msg);
@@ -2833,7 +3111,8 @@
       time.className = 'bubble-time';
       if (isMe && msg.msg_id) {
         const status = state.msgStatus[msg.msg_id];
-        time.textContent = formatTime(msg.time) + (status === 'delivered' ? ' ✅' : ' ⏳');
+        const tick = status === 'seen' ? ' ✅✅' : (status === 'delivered' ? ' ✅' : ' ⏳');
+        time.textContent = formatTime(msg.time) + tick;
         time.dataset.msgId = msg.msg_id;
         time.id = 'status-' + msg.msg_id;
       } else {
@@ -2882,6 +3161,49 @@
           // Mobile: long-press (500 ms)
           attachLongPress(senderRow, _toggleMuteSender);
         }
+      }
+
+      // Message action buttons: reply (all), edit/delete (own or admin)
+      if (msg.msg_id && !msg.deleted && msg.type === 'text') {
+        const actions = document.createElement('div');
+        actions.className = 'msg-actions';
+
+        // Reply button — available on all messages
+        const replyBtn = document.createElement('button');
+        replyBtn.className = 'msg-action-btn';
+        replyBtn.title = 'Reply';
+        replyBtn.textContent = '↩';
+        replyBtn.onclick = () => startReply(msg);
+        actions.appendChild(replyBtn);
+
+        // Edit/delete — own messages only (or room admin)
+        const isRoomAdmin = msg.to && state.currentRoom === msg.to &&
+          state.socket && state.socket.connected;  // simplified; server enforces auth
+        if (isMe) {
+          const editBtn = document.createElement('button');
+          editBtn.className = 'msg-action-btn';
+          editBtn.title = 'Edit';
+          editBtn.textContent = '✏️';
+          editBtn.onclick = () => startEdit(msg);
+          actions.appendChild(editBtn);
+
+          const delBtn = document.createElement('button');
+          delBtn.className = 'msg-action-btn';
+          delBtn.title = 'Delete';
+          delBtn.textContent = '🗑';
+          delBtn.onclick = () => {
+            if (confirm('Delete this message?')) {
+              state.socket.emit('message:delete', {
+                msg_id: msg.msg_id,
+                to: msg.to,
+                from: msg.from,
+              });
+            }
+          };
+          actions.appendChild(delBtn);
+        }
+
+        bubble.appendChild(actions);
       }
 
       wrapper.appendChild(bubble);
@@ -2967,7 +3289,8 @@
     function _updateMsgStatus(msgId, tick, newId) {
       const el = document.getElementById('status-' + msgId);
       if (el) {
-        const time = el.textContent.replace(/ [⏳✅🟡]$/, '');
+        // Strip any existing tick (single or double checkmark, hourglass)
+        const time = el.textContent.replace(/ [⏳✅🟡]$/, '').replace(/ ✅✅$/, '');
         el.textContent = time + ' ' + tick;
         if (newId) el.id = 'status-' + newId;  // re-key to real server msg_id
       }
@@ -2983,6 +3306,47 @@
       const text = input.value.trim();
       if (!text) return;
 
+      // ── Edit mode: emit edit instead of new message ───────────────────────
+      if (state._editingMsg) {
+        const editMsg = state._editingMsg;
+        state._editingMsg = null;
+        cancelReply();
+        input.value = '';
+        input.style.height = 'auto';
+
+        let editPayload = { msg_id: editMsg.msg_id, to: editMsg.to, text, from: editMsg.from };
+
+        // Re-encrypt if needed
+        if (editMsg.encrypted) {
+          if (state.currentRoom && state.roomKeys[state.currentRoom]) {
+            const ct = await E2E.encryptRoom(text, state.currentRoom);
+            if (ct) { editPayload.encrypted = ct; editPayload.text = '🔒'; }
+          } else if (state.currentChat !== 'global') {
+            const ct = await E2E.encrypt(text, state.currentChat);
+            if (ct) { editPayload.encrypted = ct; editPayload.text = '🔒'; }
+          }
+        }
+
+        state.socket.emit('message:edit', editPayload);
+        // Optimistic local update
+        const m = _findMsgById(editMsg.msg_id);
+        if (m) { m.text = text; m.edited = true; }
+        const wrapper = document.querySelector(`[data-msg-id="${editMsg.msg_id}"]`);
+        if (wrapper) {
+          const textEl = wrapper.querySelector('.bubble-text');
+          if (textEl) {
+            textEl.textContent = text;
+            if (!wrapper.querySelector('.edited-label')) {
+              const label = document.createElement('span');
+              label.className = 'edited-label';
+              label.textContent = ' (edited)';
+              textEl.appendChild(label);
+            }
+          }
+        }
+        return;
+      }
+
       input.value = '';
       input.style.height = 'auto';
 
@@ -2993,6 +3357,12 @@
       const tempId = 'tmp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
 
       let payload = { to: state.currentChat, text, _tempId: tempId };
+
+      // Attach reply-to if set
+      if (state.replyTo) {
+        payload.reply_to = state.replyTo;
+        cancelReply();
+      }
 
       // Encrypt private DMs end-to-end (ECDH-derived shared key)
       if (state.currentChat !== 'global' && !state.currentRoom) {
@@ -3017,6 +3387,7 @@
         msg_id: tempId,
         _local: true,
         _origText: text,  // keep original for echo matching
+        reply_to: payload.reply_to,
       };
       state.msgStatus[tempId] = 'sending';
       await addMessage(localMsg, true);
@@ -3038,6 +3409,64 @@
         e.preventDefault();
         sendMessage(); // async, fire-and-forget is fine here
       }
+    }
+
+    // ─── REPLY-TO ──────────────────────────────────────────────
+    function startReply(msg) {
+      state.replyTo = { msg_id: msg.msg_id, from: msg.from, text: msg.text || '[file]' };
+      const bar = document.getElementById('reply-bar');
+      const barText = document.getElementById('reply-bar-text');
+      barText.textContent = `${msg.from}: ${(msg.text || '[file]').slice(0, 60)}`;
+      bar.classList.add('active');
+      document.getElementById('msg-input').focus();
+    }
+
+    function cancelReply() {
+      state.replyTo = null;
+      document.getElementById('reply-bar').classList.remove('active');
+    }
+
+    // ─── EDIT MESSAGE ──────────────────────────────────────────
+    function startEdit(msg) {
+      const input = document.getElementById('msg-input');
+      input.value = msg.text || '';
+      input.focus();
+      // Store edit context so sendMessage knows to emit edit instead of new message
+      state._editingMsg = msg;
+      const bar = document.getElementById('reply-bar');
+      const barText = document.getElementById('reply-bar-text');
+      barText.textContent = `Editing: ${(msg.text || '').slice(0, 60)}`;
+      bar.classList.add('active');
+    }
+
+    // ─── SOUND MUTE TOGGLE ─────────────────────────────────────
+    function toggleSoundMute() {
+      state.soundMuted = !state.soundMuted;
+      const btn = document.getElementById('sound-mute-btn');
+      if (btn) btn.textContent = state.soundMuted ? '🔕' : '🔔';
+      showToast(state.soundMuted ? '🔕 Notification sounds muted' : '🔔 Notification sounds on');
+    }
+
+    // ─── MESSAGE HELPERS ───────────────────────────────────────
+    function _findMsgById(msgId) {
+      for (const arr of Object.values(state.chatMessages)) {
+        const m = arr.find(m => m.msg_id === msgId);
+        if (m) return m;
+      }
+      return null;
+    }
+
+    function _scrollToMsg(msgId) {
+      const el = document.querySelector(`[data-msg-id="${msgId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.outline = '2px solid var(--accent)';
+        setTimeout(() => { el.style.outline = ''; }, 1500);
+      }
+    }
+
+    function _escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     let typingTimeout;
@@ -3277,6 +3706,17 @@
 
       // Clear typing
       document.getElementById('typing-indicator').textContent = '';
+
+      // Emit seen for DM messages from the other party
+      if (isDM && state.socket && state.socket.connected) {
+        const unseenIds = (state.chatMessages[chatId] || [])
+          .filter(m => m.from === chatId && m.msg_id && state.msgStatus[m.msg_id] !== 'seen')
+          .map(m => m.msg_id);
+        if (unseenIds.length) {
+          state.socket.emit('message:seen', { msg_ids: unseenIds, sender: chatId });
+          unseenIds.forEach(id => { state.msgStatus[id] = 'seen'; });
+        }
+      }
     }
 
     // ─── USER LIST ────────────────────────────────────────────────

@@ -90,6 +90,12 @@ EPHEMERAL_TTLS = {
 # Leave unset to disable the endpoint entirely.
 ANALYTICS_KEY = os.environ.get('ANALYTICS_KEY', '')
 
+# ── Admin password ────────────────────────────────────────────────────────────
+# Set ADMIN_PASSWORD env var to enable admin mode.
+# Users who enter this password on login get is_admin=True on their session.
+# Leave unset to disable admin mode entirely (no one can be admin).
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
+
 # ── Server access password ────────────────────────────────────────────────────
 # Set SERVER_PASSWORD env var to require a password on join.
 # Leave unset (or empty) to allow anyone with the link to join.
