@@ -438,6 +438,50 @@ def register_socket_handlers(socketio):
         # Only update the public list (private rooms don't appear there)
         emit('room:list', _public_room_list(), broadcast=True)
 
+    # ── room:key ──────────────────────────────────────────────────────────────
+
+    @socketio.on('room:key')
+    def handle_room_key(data):
+        """
+        Room creator uploads the AES-GCM session key (as JWK) for the room.
+        The server stores it and relays it to any members already in the room,
+        and to future joiners via room:joined.
+
+        The server never uses this key — it is opaque bytes to the relay.
+        Only room members receive it.
+        """
+        if not isinstance(data, dict):
+            return
+        sid  = current_sid()
+        user = current_user()
+        if not sid or not user:
+            return
+
+        room_id = str(data.get('room_id', ''))
+        key_jwk = data.get('key')   # dict (JWK)
+
+        room = get_room(room_id)
+        if not room:
+            return
+
+        # Only the room creator may set the session key
+        if room['creator_sid'] != sid:
+            return
+
+        # Validate: must be a dict (JWK object), not a string or other type
+        if not isinstance(key_jwk, dict):
+            return
+
+        room['session_key'] = key_jwk
+
+        # Distribute to all current members except the creator
+        for member_sid in room['members']:
+            if member_sid != sid:
+                emit('room:key', {
+                    'room_id': room_id,
+                    'key':     key_jwk,
+                }, to=member_sid)
+
     # ── room:join ─────────────────────────────────────────────────────────────
 
     @socketio.on('room:join')
@@ -754,6 +798,7 @@ def register_socket_handlers(socketio):
             'members':    room_member_list(room_id),
             'is_admin':   sid in room['admins'],
             'is_frozen':  room['is_frozen'],
+            'session_key': room.get('session_key'),   # None if creator hasn't sent it yet
         })
 
         emit('system_message',

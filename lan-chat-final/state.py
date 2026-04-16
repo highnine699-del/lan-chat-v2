@@ -256,6 +256,7 @@ def create_room(
         'messages':     deque(maxlen=ROOM_HISTORY_SIZE),
         'is_frozen':    False,
         'delete_timer': None,
+        'session_key':  None,   # AES-GCM JWK set by creator, relayed to joiners
     }
     rooms[room_id] = room
     analytics['rooms_created'] += 1
