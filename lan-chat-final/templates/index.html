@@ -1325,6 +1325,20 @@
         </div>
         <!-- Users will appear here -->
       </div>
+
+      <!-- Room action buttons at the bottom of the sidebar -->
+      <div style="display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--border);flex-shrink:0;">
+        <button onclick="openRoomModal('create')" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--accent);color:var(--accent);
+                 border-radius:8px;padding:8px 4px;font-size:12px;font-weight:600;cursor:pointer;
+                 transition:all 0.2s;" title="Create a new room">
+          ＋ New Room
+        </button>
+        <button onclick="openRoomModal('join')" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);
+                 border-radius:8px;padding:8px 4px;font-size:12px;font-weight:600;cursor:pointer;
+                 transition:all 0.2s;" title="Join a private room by ID">
+          🔑 Join Private
+        </button>
+      </div>
     </div>
 
     <!-- CHAT AREA -->
@@ -1395,6 +1409,78 @@
           <button class="rec-send" onclick="stopRecord()" title="Send">➤</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ROOM MODAL -->
+  <div id="room-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);
+       z-index:800;align-items:center;justify-content:center;">
+    <div style="background:var(--bg-secondary);border-radius:16px;padding:28px 24px;width:320px;
+                max-width:92vw;box-shadow:0 20px 60px rgba(0,0,0,0.6);border:1px solid var(--border);">
+
+      <!-- Create Room -->
+      <div id="room-modal-create">
+        <h3 style="margin-bottom:18px;font-size:17px;">🏠 Create Room</h3>
+
+        <input id="rm-name" type="text" maxlength="32" placeholder="Room name" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);border-radius:8px;
+                 padding:10px 12px;color:var(--text-primary);font-size:14px;outline:none;margin-bottom:10px;" />
+
+        <!-- Visibility toggle -->
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <button id="rm-vis-public" onclick="setRoomVis('public')" style="flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--accent);
+                   background:rgba(0,255,136,0.15);color:var(--accent);font-size:13px;
+                   font-weight:600;cursor:pointer;">🌐 Public</button>
+          <button id="rm-vis-private" onclick="setRoomVis('private')" style="flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--border);
+                   background:var(--bg-tertiary);color:var(--text-secondary);font-size:13px;
+                   font-weight:600;cursor:pointer;">🔒 Private</button>
+        </div>
+
+        <!-- Password (private only) -->
+        <div id="rm-password-wrap" style="display:none;margin-bottom:10px;">
+          <input id="rm-password" type="text" maxlength="64" placeholder="Password (optional)" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);border-radius:8px;
+                   padding:10px 12px;color:var(--text-primary);font-size:14px;outline:none;" />
+        </div>
+
+        <!-- TTL -->
+        <select id="rm-ttl" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);border-radius:8px;
+                 padding:10px 12px;color:var(--text-primary);font-size:14px;outline:none;margin-bottom:16px;
+                 appearance:none;cursor:pointer;">
+          <option value="session">⏳ Session (until empty)</option>
+          <option value="5min">5 minutes</option>
+          <option value="1hour">1 hour</option>
+        </select>
+
+        <div style="display:flex;gap:8px;">
+          <button onclick="closeRoomModal()" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border);
+                   background:none;color:var(--text-secondary);font-size:14px;cursor:pointer;">Cancel</button>
+          <button onclick="submitCreateRoom()" style="flex:1;padding:10px;border-radius:8px;border:none;
+                   background:var(--accent);color:#0a0e13;font-size:14px;font-weight:700;cursor:pointer;">
+            Create
+          </button>
+        </div>
+      </div>
+
+      <!-- Join Private Room -->
+      <div id="room-modal-join" style="display:none;">
+        <h3 style="margin-bottom:18px;font-size:17px;">🔑 Join Private Room</h3>
+
+        <input id="rm-join-id" type="text" maxlength="16" placeholder="Room ID (e.g. A3F9B2C1)" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);border-radius:8px;
+                 padding:10px 12px;color:var(--text-primary);font-size:14px;outline:none;margin-bottom:10px;
+                 font-family:monospace;letter-spacing:1px;" />
+
+        <input id="rm-join-password" type="text" maxlength="64" placeholder="Password (if required)" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);border-radius:8px;
+                 padding:10px 12px;color:var(--text-primary);font-size:14px;outline:none;margin-bottom:16px;" />
+
+        <div style="display:flex;gap:8px;">
+          <button onclick="closeRoomModal()" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border);
+                   background:none;color:var(--text-secondary);font-size:14px;cursor:pointer;">Cancel</button>
+          <button onclick="submitJoinPrivateRoom()" style="flex:1;padding:10px;border-radius:8px;border:none;
+                   background:var(--accent);color:#0a0e13;font-size:14px;font-weight:700;cursor:pointer;">
+            Join
+          </button>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -1920,6 +2006,13 @@
       s.on('room:created', async data => {
         state.currentRoom = data.room_id;
         showToast(`Room "${data.name}" created`);
+
+        // For private rooms, show the room ID so the creator can share it
+        if (data.visibility === 'private') {
+          setTimeout(() => {
+            showToast(`🔑 Room ID: ${data.room_id} — share this to invite people`);
+          }, 1500);
+        }
 
         // Generate a session key for this room and upload it to the server.
         // The server relays it to joiners — it cannot read it.
@@ -2822,6 +2915,83 @@
         item.style.display = name.includes(query) ? '' : 'none';
       });
     }
+
+    // ─── ROOM MODAL ───────────────────────────────────────────
+    let _roomVis = 'public';
+
+    function openRoomModal(mode) {
+      const modal = document.getElementById('room-modal');
+      document.getElementById('room-modal-create').style.display = mode === 'create' ? 'block' : 'none';
+      document.getElementById('room-modal-join').style.display = mode === 'join' ? 'block' : 'none';
+      modal.style.display = 'flex';
+      // Reset fields
+      if (mode === 'create') {
+        document.getElementById('rm-name').value = '';
+        document.getElementById('rm-password').value = '';
+        document.getElementById('rm-ttl').value = 'session';
+        setRoomVis('public');
+        setTimeout(() => document.getElementById('rm-name').focus(), 50);
+      } else {
+        document.getElementById('rm-join-id').value = '';
+        document.getElementById('rm-join-password').value = '';
+        setTimeout(() => document.getElementById('rm-join-id').focus(), 50);
+      }
+    }
+
+    function closeRoomModal() {
+      document.getElementById('room-modal').style.display = 'none';
+    }
+
+    function setRoomVis(vis) {
+      _roomVis = vis;
+      const pubBtn = document.getElementById('rm-vis-public');
+      const privBtn = document.getElementById('rm-vis-private');
+      const pwWrap = document.getElementById('rm-password-wrap');
+      if (vis === 'public') {
+        pubBtn.style.border = '1.5px solid var(--accent)';
+        pubBtn.style.background = 'rgba(0,255,136,0.15)';
+        pubBtn.style.color = 'var(--accent)';
+        privBtn.style.border = '1.5px solid var(--border)';
+        privBtn.style.background = 'var(--bg-tertiary)';
+        privBtn.style.color = 'var(--text-secondary)';
+        pwWrap.style.display = 'none';
+      } else {
+        privBtn.style.border = '1.5px solid var(--accent)';
+        privBtn.style.background = 'rgba(0,255,136,0.15)';
+        privBtn.style.color = 'var(--accent)';
+        pubBtn.style.border = '1.5px solid var(--border)';
+        pubBtn.style.background = 'var(--bg-tertiary)';
+        pubBtn.style.color = 'var(--text-secondary)';
+        pwWrap.style.display = 'block';
+      }
+    }
+
+    function submitCreateRoom() {
+      const name = document.getElementById('rm-name').value.trim();
+      if (!name) { document.getElementById('rm-name').focus(); return; }
+      const password = document.getElementById('rm-password').value.trim();
+      const ttl = document.getElementById('rm-ttl').value;
+      state.socket.emit('room:create', {
+        name,
+        visibility: _roomVis,
+        password: _roomVis === 'private' ? password : '',
+        ttl,
+      });
+      closeRoomModal();
+    }
+
+    function submitJoinPrivateRoom() {
+      const roomId = document.getElementById('rm-join-id').value.trim().toUpperCase();
+      const password = document.getElementById('rm-join-password').value.trim();
+      if (!roomId) { document.getElementById('rm-join-id').focus(); return; }
+      state.socket.emit('room:join_private', { room_id: roomId, password });
+      closeRoomModal();
+    }
+
+    // Close modal on backdrop click
+    document.getElementById('room-modal').addEventListener('click', function (e) {
+      if (e.target === this) closeRoomModal();
+    });
 
     // ─── ROOM LIST ────────────────────────────────────────────────
     // Renders public rooms into the sidebar chat list.
@@ -3733,6 +3903,81 @@
     // Enter key for login
     document.getElementById('username-input').focus();
   </script>
+
+  <!-- ROOM MODAL -->
+  <div id="room-modal" onclick="if(event.target===this)closeRoomModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);
+              z-index:800;align-items:center;justify-content:center;">
+    <div style="background:var(--bg-secondary);border-radius:16px;padding:28px 24px;
+                width:320px;max-width:92vw;box-shadow:0 20px 60px rgba(0,0,0,0.6);
+                border:1px solid var(--border);">
+
+      <!-- Create Room panel -->
+      <div id="room-modal-create">
+        <h3 style="margin-bottom:18px;font-size:17px;">🏠 Create Room</h3>
+
+        <input id="rm-name" type="text" maxlength="32" placeholder="Room name"
+          onkeydown="if(event.key==='Enter')submitCreateRoom()" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);
+                 border-radius:8px;padding:10px 12px;color:var(--text-primary);font-size:14px;
+                 outline:none;margin-bottom:10px;box-sizing:border-box;" />
+
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <button id="rm-vis-public" onclick="setRoomVis('public')" style="flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--accent);
+                   background:rgba(0,255,136,0.15);color:var(--accent);font-size:13px;
+                   font-weight:600;cursor:pointer;">🌐 Public</button>
+          <button id="rm-vis-private" onclick="setRoomVis('private')" style="flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--border);
+                   background:var(--bg-tertiary);color:var(--text-secondary);font-size:13px;
+                   font-weight:600;cursor:pointer;">🔒 Private</button>
+        </div>
+
+        <div id="rm-password-wrap" style="display:none;margin-bottom:10px;">
+          <input id="rm-password" type="text" maxlength="64" placeholder="Password (optional)"
+            onkeydown="if(event.key==='Enter')submitCreateRoom()" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);
+                   border-radius:8px;padding:10px 12px;color:var(--text-primary);font-size:14px;
+                   outline:none;box-sizing:border-box;" />
+        </div>
+
+        <select id="rm-ttl" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);
+                 border-radius:8px;padding:10px 12px;color:var(--text-primary);font-size:14px;
+                 outline:none;margin-bottom:16px;cursor:pointer;box-sizing:border-box;">
+          <option value="session">⏳ Session (until empty)</option>
+          <option value="5min">5 minutes</option>
+          <option value="1hour">1 hour</option>
+        </select>
+
+        <div style="display:flex;gap:8px;">
+          <button onclick="closeRoomModal()" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border);
+                   background:none;color:var(--text-secondary);font-size:14px;cursor:pointer;">Cancel</button>
+          <button onclick="submitCreateRoom()" style="flex:1;padding:10px;border-radius:8px;border:none;background:var(--accent);
+                   color:#0a0e13;font-size:14px;font-weight:700;cursor:pointer;">Create</button>
+        </div>
+      </div>
+
+      <!-- Join Private Room panel -->
+      <div id="room-modal-join" style="display:none;">
+        <h3 style="margin-bottom:18px;font-size:17px;">🔑 Join Private Room</h3>
+
+        <input id="rm-join-id" type="text" maxlength="16" placeholder="Room ID (e.g. A3F9B2C1)"
+          onkeydown="if(event.key==='Enter')document.getElementById('rm-join-password').focus()" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);
+                 border-radius:8px;padding:10px 12px;color:var(--text-primary);font-size:14px;
+                 outline:none;margin-bottom:10px;font-family:monospace;letter-spacing:1px;
+                 box-sizing:border-box;" />
+
+        <input id="rm-join-password" type="text" maxlength="64" placeholder="Password (if required)"
+          onkeydown="if(event.key==='Enter')submitJoinPrivateRoom()" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);
+                 border-radius:8px;padding:10px 12px;color:var(--text-primary);font-size:14px;
+                 outline:none;margin-bottom:16px;box-sizing:border-box;" />
+
+        <div style="display:flex;gap:8px;">
+          <button onclick="closeRoomModal()" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border);
+                   background:none;color:var(--text-secondary);font-size:14px;cursor:pointer;">Cancel</button>
+          <button onclick="submitJoinPrivateRoom()" style="flex:1;padding:10px;border-radius:8px;border:none;background:var(--accent);
+                   color:#0a0e13;font-size:14px;font-weight:700;cursor:pointer;">Join</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
 </body>
 
 </html>
