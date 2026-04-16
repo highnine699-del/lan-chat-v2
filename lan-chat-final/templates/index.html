@@ -1703,12 +1703,16 @@
           ['encrypt', 'decrypt']
         );
         state.roomKeys[roomId] = key;
+        console.log(`[E2E] Room key imported for ${roomId}`);
       },
 
       /** Encrypt plaintext for a room. Returns base64(iv + ciphertext) */
       async encryptRoom(plaintext, roomId) {
         const key = state.roomKeys[roomId];
-        if (!key) return null;
+        if (!key) {
+          console.warn(`[E2E] No room key for ${roomId} — cannot encrypt`);
+          return null;
+        }
         const iv = crypto.getRandomValues(new Uint8Array(12));
         const encoded = new TextEncoder().encode(plaintext);
         const cipherBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
@@ -1721,14 +1725,18 @@
       /** Decrypt a base64(iv + ciphertext) room message */
       async decryptRoom(b64, roomId) {
         const key = state.roomKeys[roomId];
-        if (!key) return null;
+        if (!key) {
+          console.warn(`[E2E] No room key for ${roomId} — cannot decrypt`);
+          return null;
+        }
         try {
           const combined = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
           const iv = combined.slice(0, 12);
           const cipherBuf = combined.slice(12);
           const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, cipherBuf);
           return new TextDecoder().decode(plainBuf);
-        } catch {
+        } catch (err) {
+          console.error(`[E2E] Room decrypt failed for ${roomId}:`, err);
           return null;
         }
       },
@@ -2035,9 +2043,10 @@
         try {
           await E2E.generateRoomKey(data.room_id);
           const jwk = await E2E.exportRoomKey(data.room_id);
+          console.log(`[E2E] Room key generated for ${data.room_id}, uploading to server`);
           s.emit('room:key', { room_id: data.room_id, key: jwk });
         } catch (err) {
-          console.warn('[E2E] Room key generation failed:', err);
+          console.error('[E2E] Room key generation failed:', err);
         }
 
         s.emit('room:list', {});
@@ -2052,11 +2061,14 @@
 
         // Import the room session key if the server provided one
         if (data.session_key) {
+          console.log(`[E2E] Importing room key for ${data.room_id}`);
           try {
             await E2E.importRoomKey(data.room_id, data.session_key);
           } catch (err) {
-            console.warn('[E2E] Failed to import room key:', err);
+            console.error('[E2E] Failed to import room key:', err);
           }
+        } else {
+          console.warn(`[E2E] No session_key in room:joined for ${data.room_id}`);
         }
 
         // Switch the chat view to this room
@@ -2088,10 +2100,11 @@
       // Receive a room session key distributed after we joined
       s.on('room:key', async data => {
         if (data.room_id && data.key) {
+          console.log(`[E2E] Received room:key event for ${data.room_id}`);
           try {
             await E2E.importRoomKey(data.room_id, data.key);
           } catch (err) {
-            console.warn('[E2E] Failed to import late room key:', err);
+            console.error('[E2E] Failed to import late room key:', err);
           }
         }
       });
@@ -2447,14 +2460,17 @@
     async function addMessage(msg, live) {
       // Decrypt encrypted messages
       if (msg.encrypted) {
+        console.log(`[Decrypt] msg.to: ${msg.to}, currentRoom: ${state.currentRoom}, roomKeys:`, Object.keys(state.roomKeys));
         // Room message: msg.to is a room_id (8-char hex like "A3F9B2C1")
         // DM: msg.to is a display name like "Alice#AB12"
         const isRoomMsg = msg.to && state.roomKeys[msg.to] !== undefined;
 
         if (isRoomMsg) {
+          console.log(`[Decrypt] Decrypting room message for ${msg.to}`);
           const plaintext = await E2E.decryptRoom(msg.encrypted, msg.to);
           msg = { ...msg, text: plaintext !== null ? plaintext : '🔒 [encrypted — key not available]' };
         } else if (msg.to !== 'global') {
+          console.log(`[Decrypt] Decrypting DM`);
           const peer = msg.from === state.display ? msg.to : msg.from;
           const plaintext = await E2E.decrypt(msg.encrypted, peer);
           msg = { ...msg, text: plaintext !== null ? plaintext : '🔒 [encrypted — key not available]' };
@@ -2675,8 +2691,11 @@
 
       let payload = { to: state.currentChat, text };
 
+      console.log(`[Send] currentChat: ${state.currentChat}, currentRoom: ${state.currentRoom}`);
+
       // Encrypt private DMs end-to-end (ECDH-derived shared key)
       if (state.currentChat !== 'global' && !state.currentRoom) {
+        console.log('[Send] Encrypting DM with ECDH');
         const ciphertext = await E2E.encrypt(text, state.currentChat);
         if (ciphertext) {
           payload.encrypted = ciphertext;
@@ -2686,11 +2705,17 @@
 
       // Encrypt room messages with the room session key (AES-GCM)
       if (state.currentRoom && state.roomKeys[state.currentRoom]) {
+        console.log(`[Send] Encrypting room message for ${state.currentRoom}`);
         const ciphertext = await E2E.encryptRoom(text, state.currentRoom);
         if (ciphertext) {
           payload.encrypted = ciphertext;
           payload.text = '🔒';
+          console.log('[Send] Room message encrypted successfully');
+        } else {
+          console.warn('[Send] Room encryption returned null');
         }
+      } else if (state.currentRoom) {
+        console.warn(`[Send] In room ${state.currentRoom} but no key available`);
       }
 
       state.socket.emit('send_message', payload);
