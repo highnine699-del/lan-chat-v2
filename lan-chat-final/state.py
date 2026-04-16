@@ -96,10 +96,20 @@ user_state: dict = {}
 # ── Shadow mute (auto-expiring) ───────────────────────────────────────────────
 shadow_muted: dict = {}   # sid -> {'until': float}
 
+# ── Join tokens (approval flow for private rooms) ─────────────────────────────
+join_tokens: dict = {}    # token -> {'room_id': str, 'sid': str, 'expires': float}
+
 # ── Moderation / identity ─────────────────────────────────────────────────────
 uid_tags: dict      = {}   # uid -> 4-char tag (persistent across reconnects)
+uid_sessions: dict  = {}   # uid -> sid  (active session per uid for ghost cleanup)
 message_votes: dict = {}   # msg_id -> set[uid]
 spam_tracker: dict  = {}   # sid -> {'timestamps': deque, 'cooldown_until': float}
+
+# ── Upload tracking ───────────────────────────────────────────────────────────
+upload_counts: dict = {}   # sid -> int  (files uploaded this session)
+
+# ── IP connection tracking ────────────────────────────────────────────────────
+ip_connections: dict = {}  # ip -> set[sid]
 
 # ── Analytics ─────────────────────────────────────────────────────────────────
 analytics: dict = {
@@ -480,6 +490,11 @@ def start_cleanup_worker() -> None:
             expired = [sid for sid, v in list(shadow_muted.items()) if now >= v['until']]
             for sid in expired:
                 shadow_muted.pop(sid, None)
+
+            # Prune expired join tokens
+            expired_tokens = [t for t, v in list(join_tokens.items()) if now >= v['expires']]
+            for t in expired_tokens:
+                join_tokens.pop(t, None)
 
             # Update peak users
             current_count = len(users)

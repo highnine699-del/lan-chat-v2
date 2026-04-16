@@ -2457,6 +2457,16 @@
         showToast('❌ Your request to join the room was denied.');
       });
 
+      // Token-based join — server approved the knock and issued a token
+      s.on('room:join_approved', data => {
+        showToast('✅ Approved! Joining room…');
+        // Present the token to complete the join
+        s.emit('room:join_with_token', {
+          token: data.token,
+          room_id: data.room_id,
+        });
+      });
+
       // Request notification permission
       requestNotificationPermission();
     }

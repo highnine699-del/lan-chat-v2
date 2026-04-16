@@ -26,7 +26,8 @@ from flask_socketio import emit, join_room, leave_room
 from config import (
     MAX_MESSAGE_LEN, MAX_SIGNAL_BYTES, UPLOAD_FOLDER,
     HIDE_VOTE_THRESHOLD, SPAM_COOLDOWN_S,
-    MAX_ROOM_NAME_LEN, EPHEMERAL_TTLS,
+    MAX_ROOM_NAME_LEN, EPHEMERAL_TTLS, JOIN_TOKEN_TTL_S,
+    SERVER_PASSWORD, MAX_CONNECTIONS_PER_IP,
 )
 from state import (
     # core state
@@ -34,6 +35,8 @@ from state import (
     message_history, private_history,
     rooms, user_state, shadow_muted,
     message_votes, spam_tracker, analytics,
+    join_tokens,
+    uid_sessions, ip_connections, upload_counts,
     # helpers
     get_user_list, next_color, unique_username,
     private_key, append_private, now_ms, clean_username,
@@ -124,7 +127,31 @@ def register_socket_handlers(socketio):
         if not sid:
             return
 
-        # Clean up stale session
+        # ── Server password check ─────────────────────────────────────────────
+        if SERVER_PASSWORD:
+            client_pw = str(data.get('server_password', ''))
+            if client_pw != SERVER_PASSWORD:
+                emit('error', {
+                    'code':    'AUTH_FAILED',
+                    'message': 'Wrong server password.',
+                })
+                return
+
+        # ── IP connection limit ───────────────────────────────────────────────
+        client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr or '').split(',')[0].strip()
+        ip_set = ip_connections.setdefault(client_ip, set())
+        # Remove stale sids from the IP set (disconnected clients)
+        ip_set = {s for s in ip_set if s in users or s == sid}
+        ip_connections[client_ip] = ip_set
+        if len(ip_set) >= MAX_CONNECTIONS_PER_IP and sid not in ip_set:
+            emit('error', {
+                'code':    'TOO_MANY_CONNECTIONS',
+                'message': f'Too many connections from your IP (max {MAX_CONNECTIONS_PER_IP}).',
+            })
+            return
+        ip_set.add(sid)
+
+        # ── Clean up stale session by SID ─────────────────────────────────────
         stale = users.pop(sid, None)
         if stale:
             sid_map.pop(stale['display'], None)
@@ -134,6 +161,22 @@ def register_socket_handlers(socketio):
 
         uid = str(data.get('uid', ''))[:64] or _sec.token_hex(16)
         tag = generate_tag(uid)
+
+        # ── Ghost session cleanup: remove old session for same uid ────────────
+        old_sid = uid_sessions.get(uid)
+        if old_sid and old_sid != sid and old_sid in users:
+            ghost = users.pop(old_sid, None)
+            if ghost:
+                sid_map.pop(ghost['display'], None)
+                public_keys.pop(ghost['display'], None)
+                spam_tracker.pop(old_sid, None)
+                upload_counts.pop(old_sid, None)
+                _leave_current_room_by_sid(old_sid, ghost['display'])
+                user_state.pop(old_sid, None)
+                # Remove from IP tracking
+                for ip_s in ip_connections.values():
+                    ip_s.discard(old_sid)
+        uid_sessions[uid] = sid
 
         username = unique_username(clean_username(data.get('username', '')), sid)
         display  = f'{username}#{tag}'
@@ -152,6 +195,7 @@ def register_socket_handlers(socketio):
             'persona':   None,
         }
         sid_map[display] = sid
+        upload_counts[sid] = 0
         init_user_state(sid, username, tag, color)
 
         pub_key = data.get('publicKey')
@@ -226,8 +270,20 @@ def register_socket_handlers(socketio):
 
         target = str(data.get('to', 'global'))
 
-        # Validate target
-        if target not in ('global',) and target not in rooms and target not in sid_map:
+        # ── Server-side validation ────────────────────────────────────────────
+        if target == 'global':
+            pass  # everyone can post to global
+        elif target in rooms:
+            # Must be a member of the room to post
+            room = rooms[target]
+            if sid not in room['members']:
+                err('You are not a member of this room.',
+                    'NOT_MEMBER', {'room_id': target})
+                return
+        elif target in sid_map:
+            pass  # DM — target exists
+        else:
+            err('Target not found.', 'TARGET_NOT_FOUND', {'target': target})
             return
 
         user['msg_count'] = user.get('msg_count', 0) + 1
@@ -273,7 +329,16 @@ def register_socket_handlers(socketio):
             return
 
         target = str(data.get('to', 'global'))
-        if target not in ('global',) and target not in rooms and target not in sid_map:
+        if target == 'global':
+            pass
+        elif target in rooms:
+            if sid not in rooms[target]['members']:
+                err('You are not a member of this room.',
+                    'NOT_MEMBER', {'room_id': target})
+                return
+        elif target in sid_map:
+            pass
+        else:
             return
 
         user['msg_count'] = user.get('msg_count', 0) + 1
@@ -627,9 +692,20 @@ def register_socket_handlers(socketio):
         if not room or knocker_sid not in room.get('pending_knocks', {}):
             return
         room['pending_knocks'].pop(knocker_sid, None)
-        knocker = users.get(knocker_sid)
-        if knocker:
-            _do_join_room(knocker_sid, knocker, room)
+
+        # Issue a time-limited join token instead of joining directly.
+        # The knocker must present this token within JOIN_TOKEN_TTL_S seconds.
+        token = _sec.token_hex(16)
+        join_tokens[token] = {
+            'room_id': room_id,
+            'sid':     knocker_sid,
+            'expires': time.time() + JOIN_TOKEN_TTL_S,
+        }
+        emit('room:join_approved', {
+            'room_id': room_id,
+            'token':   token,
+            'ttl':     JOIN_TOKEN_TTL_S,
+        }, to=knocker_sid)
 
     @socketio.on('room:knock_deny')
     def handle_knock_deny(data):
@@ -649,7 +725,44 @@ def register_socket_handlers(socketio):
         room['pending_knocks'].pop(knocker_sid, None)
         emit('room:knock_denied', {'room_id': room_id}, to=knocker_sid)
 
-    # ── room:call ─────────────────────────────────────────────────────────────
+    # ── room:join_with_token ──────────────────────────────────────────────────
+
+    @socketio.on('room:join_with_token')
+    def handle_join_with_token(data):
+        """
+        Complete a knock-approved join using a time-limited token.
+        The token was issued by room:knock_approve and sent to the knocker.
+        """
+        if not isinstance(data, dict):
+            return
+        sid  = current_sid()
+        user = current_user()
+        if not sid or not user:
+            return
+
+        token = str(data.get('token', ''))
+        entry = join_tokens.pop(token, None)
+
+        if not entry:
+            err('Invalid or expired join token.', 'INVALID_TOKEN')
+            return
+
+        if time.time() > entry['expires']:
+            err('Join token has expired. Request approval again.',
+                'TOKEN_EXPIRED', {'room_id': entry['room_id']})
+            return
+
+        if entry['sid'] != sid:
+            err('This token was not issued for your session.', 'TOKEN_MISMATCH')
+            return
+
+        room = get_room(entry['room_id'])
+        if not room:
+            err('Room no longer exists.', 'ROOM_NOT_FOUND',
+                {'room_id': entry['room_id']})
+            return
+
+        _do_join_room(sid, user, room)
 
     @socketio.on('room:call')
     def handle_room_call(data):
@@ -886,10 +999,23 @@ def register_socket_handlers(socketio):
             return
 
         display = user['display']
+        uid     = user.get('uid', '')
         try:
             sid_map.pop(display, None)
             public_keys.pop(display, None)
             spam_tracker.pop(sid, None)
+            upload_counts.pop(sid, None)
+
+            # Clean up uid_sessions only if this sid is still the active one
+            if uid and uid_sessions.get(uid) == sid:
+                uid_sessions.pop(uid, None)
+
+            # Clean up IP tracking
+            client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr or '').split(',')[0].strip()
+            if client_ip in ip_connections:
+                ip_connections[client_ip].discard(sid)
+                if not ip_connections[client_ip]:
+                    del ip_connections[client_ip]
 
             # Capture room_id BEFORE popping user_state so _leave_current_room_by_sid
             # can still find it (user_state is the source of truth for room_id here)

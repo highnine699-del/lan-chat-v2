@@ -26,6 +26,8 @@ from config import (
     MAX_UPLOAD_BYTES,
     PING_TIMEOUT,
     PING_INTERVAL,
+    ALLOWED_ORIGINS,
+    MAX_CONNECTIONS_PER_IP,
 )
 from routes import register_routes
 
@@ -50,7 +52,7 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES  # Flask rejects oversized b
 
 socketio = SocketIO(
     app,
-    cors_allowed_origins='*',
+    cors_allowed_origins=ALLOWED_ORIGINS,
     max_http_buffer_size=MAX_HTTP_BUFFER_SIZE,
     ping_timeout=PING_TIMEOUT,
     ping_interval=PING_INTERVAL,
@@ -63,6 +65,29 @@ register_routes(app, socketio)
 # ── Start background cleanup worker ──────────────────────────────────────────
 from state import start_cleanup_worker
 start_cleanup_worker()
+
+# ── Connection rate limiting ──────────────────────────────────────────────────
+# Track active socket connections per IP to prevent flooding.
+import collections
+_conn_counts: dict = collections.defaultdict(int)
+
+@socketio.on('connect')
+def _on_connect_guard():
+    """Reject connections that exceed MAX_CONNECTIONS_PER_IP."""
+    from flask import request as _req
+    ip = _req.environ.get('HTTP_X_FORWARDED_FOR', _req.remote_addr or '').split(',')[0].strip()
+    _conn_counts[ip] += 1
+    if _conn_counts[ip] > MAX_CONNECTIONS_PER_IP:
+        _conn_counts[ip] -= 1
+        log.warning('Connection rejected: too many connections from %s (%d)', ip, _conn_counts[ip])
+        return False  # reject the connection
+
+@socketio.on('disconnect')
+def _on_disconnect_guard():
+    from flask import request as _req
+    ip = _req.environ.get('HTTP_X_FORWARDED_FOR', _req.remote_addr or '').split(',')[0].strip()
+    if _conn_counts[ip] > 0:
+        _conn_counts[ip] -= 1
 
 
 # ── ngrok browser-warning bypass ─────────────────────────────────────────────

@@ -47,6 +47,24 @@ SPAM_COOLDOWN_S   = 20   # cooldown duration after limit is hit
 SPAM_REPEAT_LIMIT = 3    # same message repeated this many times → shadow mute
 SPAM_FLOOD_WINDOW = 10   # seconds to check for copy-paste floods
 
+# ── Security (ngrok / public deployment) ─────────────────────────────────────
+# Origins allowed to connect via WebSocket.
+# Set ALLOWED_ORIGINS env var as comma-separated list to override.
+# Default: allow localhost + any ngrok subdomain.
+_raw_origins = os.environ.get('ALLOWED_ORIGINS', '')
+ALLOWED_ORIGINS: list[str] | str = (
+    [o.strip() for o in _raw_origins.split(',') if o.strip()]
+    if _raw_origins
+    else '*'   # permissive default — set ALLOWED_ORIGINS in production
+)
+
+# Max simultaneous socket connections per IP address.
+# Prevents a single client from flooding the server with connections.
+MAX_CONNECTIONS_PER_IP = int(os.environ.get('MAX_CONNECTIONS_PER_IP', '5'))
+
+# Join token TTL in seconds — how long an approval token is valid.
+JOIN_TOKEN_TTL_S = int(os.environ.get('JOIN_TOKEN_TTL_S', '300'))  # 5 minutes
+
 # ── Vote-to-hide ──────────────────────────────────────────────────────────────
 HIDE_VOTE_THRESHOLD = 3  # votes needed to hide a message for everyone
 
@@ -71,6 +89,19 @@ EPHEMERAL_TTLS = {
 # Set ANALYTICS_KEY env var to protect the /analytics endpoint.
 # Leave unset to disable the endpoint entirely.
 ANALYTICS_KEY = os.environ.get('ANALYTICS_KEY', '')
+
+# ── Server access password ────────────────────────────────────────────────────
+# Set SERVER_PASSWORD env var to require a password on join.
+# Leave unset (or empty) to allow anyone with the link to join.
+SERVER_PASSWORD = os.environ.get('SERVER_PASSWORD', '')
+
+# ── Connection limits ─────────────────────────────────────────────────────────
+# Maximum simultaneous socket connections from a single IP address.
+# Prevents bot flooding and memory exhaustion.
+MAX_CONNECTIONS_PER_IP = int(os.environ.get('MAX_CONNECTIONS_PER_IP', '5'))
+
+# Maximum file uploads per user session (resets on page refresh).
+MAX_UPLOADS_PER_SESSION = int(os.environ.get('MAX_UPLOADS_PER_SESSION', '30'))
 
 # ── User avatar colours (round-robin) ─────────────────────────────────────────
 USER_COLORS = [
