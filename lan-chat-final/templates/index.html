@@ -1586,7 +1586,8 @@
       myPublicKeyJwk: null,
       peerPublicKeys: {},
       sharedSecrets: {},
-      roomKeys: {},   // room_id -> CryptoKey (AES-GCM, session-only)
+      roomKeys: {},        // room_id -> CryptoKey (AES-GCM, session-only)
+      currentRoomName: '', // display name of the active room (for header fallback)
     };
 
     // ─── E2E ENCRYPTION ───────────────────────────────────────────────
@@ -2005,6 +2006,22 @@
       // ── Room events ───────────────────────────────────────────────────────
       s.on('room:created', async data => {
         state.currentRoom = data.room_id;
+        state.currentRoomName = data.name;
+
+        // Switch the chat view to this room immediately
+        state.currentChat = data.room_id;
+        if (!state.chatMessages[data.room_id]) state.chatMessages[data.room_id] = [];
+        document.getElementById('chat-placeholder').style.display = 'none';
+        document.getElementById('active-chat').style.display = 'flex';
+        document.getElementById('messages').innerHTML = '';
+        document.getElementById('header-name').textContent = data.name;
+        document.getElementById('header-status').textContent = '1 member · 🔒 encrypted';
+        const av = document.getElementById('header-avatar');
+        av.style.background = '#1a3a5c'; av.style.fontSize = '18px'; av.textContent = '🏠';
+        const ha = document.querySelector('.header-actions');
+        if (ha) ha.style.display = 'flex';
+        document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+
         showToast(`Room "${data.name}" created`);
 
         // For private rooms, show the room ID so the creator can share it
@@ -2015,7 +2032,6 @@
         }
 
         // Generate a session key for this room and upload it to the server.
-        // The server relays it to joiners — it cannot read it.
         try {
           await E2E.generateRoomKey(data.room_id);
           const jwk = await E2E.exportRoomKey(data.room_id);
@@ -2024,12 +2040,15 @@
           console.warn('[E2E] Room key generation failed:', err);
         }
 
-        // Refresh the room list in the sidebar if it's open
         s.emit('room:list', {});
       });
 
       s.on('room:joined', async data => {
         state.currentRoom = data.room_id;
+        state.currentRoomName = data.name;
+        state.currentChat = data.room_id;
+
+        if (!state.chatMessages[data.room_id]) state.chatMessages[data.room_id] = [];
 
         // Import the room session key if the server provided one
         if (data.session_key) {
@@ -2040,22 +2059,26 @@
           }
         }
 
-        // Update header for the room
+        // Switch the chat view to this room
+        document.getElementById('chat-placeholder').style.display = 'none';
+        document.getElementById('active-chat').style.display = 'flex';
+        document.getElementById('messages').innerHTML = '';
         document.getElementById('header-name').textContent = data.name;
         document.getElementById('header-status').textContent =
           `${(data.members || []).length} members · 🔒 encrypted`;
         const av = document.getElementById('header-avatar');
-        av.style.background = '#1a3a5c';
-        av.style.fontSize = '18px';
-        av.textContent = '🏠';
-        // Show call buttons in rooms
+        av.style.background = '#1a3a5c'; av.style.fontSize = '18px'; av.textContent = '🏠';
         const ha = document.querySelector('.header-actions');
         if (ha) ha.style.display = 'flex';
+        document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+        const roomItem = document.getElementById('chat-item-room-' + data.room_id);
+        if (roomItem) roomItem.classList.add('active');
 
-        // Load room history into the chat
+        // Load room history
         if (data.history && data.history.length) {
           data.history.forEach(m => addMessage(m, false));
         }
+        scrollToBottom();
         showToast(`Joined room "${data.name}"`);
         if (data.is_frozen) {
           showToast('⚠️ This room is frozen — messages are disabled');
@@ -2075,9 +2098,11 @@
 
       s.on('room:left', () => {
         if (state.currentRoom) {
-          delete state.roomKeys[state.currentRoom];   // discard key on leave
+          delete state.roomKeys[state.currentRoom];
         }
         state.currentRoom = null;
+        state.currentRoomName = '';
+        switchChat('global');
       });
 
       s.on('room:list', rooms => {
@@ -2112,7 +2137,9 @@
 
       s.on('room:deleted', data => {
         if (data.room_id === state.currentRoom) {
+          delete state.roomKeys[data.room_id];
           state.currentRoom = null;
+          state.currentRoomName = '';
           showToast('Room was deleted (empty for too long)');
           switchChat('global');
         }
@@ -2120,8 +2147,9 @@
 
       s.on('admin:kicked', data => {
         if (data.room_id === state.currentRoom) {
-          delete state.roomKeys[data.room_id];   // discard key on kick
+          delete state.roomKeys[data.room_id];
           state.currentRoom = null;
+          state.currentRoomName = '';
           showToast('⚠️ You were removed from the room by an admin');
           switchChat('global');
         }
@@ -2433,8 +2461,12 @@
         }
       }
 
+      // Determine chatId: room messages use room_id as chatId
+      // Room message: msg.to is a room_id (matches state.currentRoom or is in roomKeys)
+      const isRoomMsg = msg.to && (msg.to === state.currentRoom || state.roomKeys[msg.to] !== undefined);
       const chatId = msg.to === 'global' ? 'global'
-        : (msg.from === state.display ? msg.to : msg.from);
+        : isRoomMsg ? msg.to
+          : (msg.from === state.display ? msg.to : msg.from);
 
       if (!state.chatMessages[chatId]) state.chatMessages[chatId] = [];
       state.chatMessages[chatId].push(msg);
@@ -2462,8 +2494,9 @@
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
 
-      // Sender name + tag + reputation (only in global and not me)
-      if (!isMe && msg.to === 'global') {
+      // Sender name + tag + reputation (global chat and rooms, not DMs)
+      const isRoomContext = msg.to && msg.to !== 'global' && state.roomKeys[msg.to] !== undefined;
+      if (!isMe && (msg.to === 'global' || isRoomContext)) {
         const senderRow = document.createElement('div');
         senderRow.className = 'bubble-sender';
         senderRow.style.color = msg.color || '#25d366';
@@ -2849,12 +2882,14 @@
 
       // Update active state in sidebar
       document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
-      const item = document.getElementById('chat-item-' + chatId);
+      const item = document.getElementById('chat-item-' + chatId) ||
+        document.getElementById('chat-item-room-' + chatId);
       if (item) item.classList.add('active');
 
       // Determine context: global, room, or DM
+      // A chat is a room if chatId matches the currently active room_id
       const isGlobal = chatId === 'global';
-      const isRoom = !!state.currentRoom;
+      const isRoom = !isGlobal && chatId === state.currentRoom;
       const isDM = !isGlobal && !isRoom;
 
       // Show call buttons for rooms and DMs, hide for global
@@ -2872,7 +2907,12 @@
         av.style.fontSize = '20px';
         av.textContent = '🌍';
       } else if (isRoom) {
-        // Room header is set by room:joined — just keep it
+        document.getElementById('header-name').textContent = state.currentRoomName || chatId;
+        // status is kept up-to-date by room:members event
+        const av = document.getElementById('header-avatar');
+        av.style.background = '#1a3a5c';
+        av.style.fontSize = '18px';
+        av.textContent = '🏠';
       } else {
         const user = state.users.find(u => u.display === chatId);
         document.getElementById('header-name').textContent = chatId;
@@ -2883,9 +2923,14 @@
         av.textContent = chatId[0].toUpperCase();
       }
 
+      // Show active-chat panel, hide placeholder
+      document.getElementById('chat-placeholder').style.display = 'none';
+      document.getElementById('active-chat').style.display = 'flex';
+
       // Clear unread
       state.unread[chatId] = 0;
-      const item2 = document.getElementById('chat-item-' + chatId);
+      const item2 = document.getElementById('chat-item-' + chatId) ||
+        document.getElementById('chat-item-room-' + chatId);
       if (item2) {
         const badge = item2.querySelector('.unread-badge');
         if (badge) badge.remove();
@@ -3110,6 +3155,11 @@
         item.id = id;
         item.onclick = () => {
           state.socket.emit('room:join', { room_id: r.room_id });
+          // Optimistically switch to the room chat view (room:joined will populate it)
+          state.currentRoom = r.room_id;
+          state.currentRoomName = r.name;
+          if (!state.chatMessages[r.room_id]) state.chatMessages[r.room_id] = [];
+          switchChat(r.room_id);
           toggleSidebar(false);
         };
 
