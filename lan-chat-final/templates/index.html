@@ -1472,7 +1472,7 @@
       username: '',
       tag: '',
       display: '',        // "username#tag" — the canonical identity string
-      uid: '',            // persistent device ID from localStorage
+      uid: '',            // session-only device ID — never persisted to disk
       currentChat: 'global',
       users: [],
       chatMessages: { global: [] },
@@ -1600,15 +1600,12 @@
       if (!name) { alert('Please enter a name'); return; }
       state.username = name;
 
-      // Load or generate a persistent device UID stored in localStorage.
-      // This lets the same device keep its #TAG across page refreshes.
-      let uid = localStorage.getItem('lanchat_uid');
-      if (!uid) {
-        uid = crypto.randomUUID ? crypto.randomUUID()
-          : Array.from(crypto.getRandomValues(new Uint8Array(16)))
-            .map(b => b.toString(16).padStart(2, '0')).join('');
-        localStorage.setItem('lanchat_uid', uid);
-      }
+      // Generate a session-only UID — never stored to disk or browser storage.
+      // Tag will reset on page refresh (ephemeral by design).
+      const uid = crypto.randomUUID
+        ? crypto.randomUUID()
+        : Array.from(crypto.getRandomValues(new Uint8Array(16)))
+          .map(b => b.toString(16).padStart(2, '0')).join('');
       state.uid = uid;
 
       document.getElementById('login-screen').style.display = 'none';

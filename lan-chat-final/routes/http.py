@@ -34,6 +34,15 @@ http_bp = Blueprint('http', __name__)
 # Ensure the upload directory exists when this module is imported
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+
+@http_bp.after_request
+def set_no_cache(response):
+    """Force browsers and proxies to never cache any response from this app."""
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
 # MIME types that are safe to display inline in the browser.
 # Everything else gets Content-Disposition: attachment to prevent
 # the browser from executing or rendering untrusted content.
