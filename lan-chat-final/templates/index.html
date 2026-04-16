@@ -1388,7 +1388,7 @@
         <!-- Private room ID banner — shown only for private rooms, stays visible -->
         <div id="room-id-banner" style="display:none;align-items:center;justify-content:center;
              gap:10px;padding:6px 16px;background:rgba(0,255,136,0.07);
-             border-bottom:1px solid rgba(0,255,136,0.2);flex-shrink:0;">
+             border-bottom:1px solid rgba(0,255,136,0.2);flex-shrink:0;flex-wrap:wrap;">
           <span style="font-size:12px;color:var(--text-secondary);">🔑 Room ID:</span>
           <code id="room-id-display" style="font-family:monospace;font-size:13px;font-weight:700;
                color:var(--accent);letter-spacing:2px;"></code>
@@ -1397,6 +1397,27 @@
                    cursor:pointer;font-weight:600;transition:all 0.2s;">
             📋 Copy
           </button>
+          <span style="font-size:11px;color:var(--text-muted);">
+            Key: <code id="room-key-fingerprint"
+              style="font-family:monospace;color:var(--text-secondary);font-size:11px;">—</code>
+          </span>
+          <button onclick="toggleDebugPanel()" style="margin-left:auto;background:none;border:1px solid var(--border);
+                   color:var(--text-muted);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">
+            🛠 Dev
+          </button>
+        </div>
+
+        <!-- Debug panel — hidden by default, toggle with Dev button -->
+        <div id="debug-panel" style="display:none;padding:8px 16px;background:#0a0e13;
+             border-bottom:1px solid var(--border);font-size:11px;font-family:monospace;
+             color:var(--text-secondary);flex-shrink:0;">
+          <strong style="color:var(--accent);">🛠 DEBUG</strong>
+          &nbsp;|&nbsp; Room key: <span id="dbg-key">—</span>
+          &nbsp;|&nbsp; Pending: <span id="dbg-pending">0</span>
+          &nbsp;|&nbsp; Socket: <span id="dbg-socket">—</span>
+          &nbsp;|&nbsp; Msg queue: <span id="dbg-queue">0</span>
+          <button onclick="refreshDebug()" style="margin-left:8px;background:none;border:1px solid var(--border);
+                   color:var(--text-muted);border-radius:4px;padding:1px 6px;cursor:pointer;">↻</button>
         </div>
 
         <div id="messages"></div>
@@ -1607,6 +1628,9 @@
       sharedSecrets: {},
       roomKeys: {},        // room_id -> CryptoKey (AES-GCM, session-only)
       currentRoomName: '', // display name of the active room (for header fallback)
+      // ── Reliability ─────────────────────────────────────────────────
+      pendingDecrypt: {},  // room_id -> [msg, ...] buffered until key arrives
+      msgStatus: {},       // msg_id -> 'sending'|'delivered'
     };
 
     // ─── E2E ENCRYPTION ───────────────────────────────────────────────
@@ -1723,6 +1747,27 @@
         );
         state.roomKeys[roomId] = key;
         console.log(`[E2E] Room key imported for ${roomId}`);
+
+        // Compute and display fingerprint for manual verification
+        try {
+          const raw = new TextEncoder().encode(JSON.stringify(jwk));
+          const hash = await crypto.subtle.digest('SHA-256', raw);
+          const hex = Array.from(new Uint8Array(hash))
+            .map(b => b.toString(16).padStart(2, '0').toUpperCase())
+            .join('');
+          // Format as pairs: A1:B2:C3...
+          const fp = hex.match(/.{2}/g).slice(0, 8).join(':');
+          state.roomKeyFingerprint = fp;
+          const fpEl = document.getElementById('room-key-fingerprint');
+          if (fpEl) fpEl.textContent = fp;
+        } catch (_) { }
+
+        // Flush any messages that arrived before the key was ready
+        const pending = state.pendingDecrypt[roomId] || [];
+        delete state.pendingDecrypt[roomId];
+        for (const msg of pending) {
+          await addMessage(msg, true);
+        }
       },
 
       /** Encrypt plaintext for a room. Returns base64(iv + ciphertext) */
@@ -1837,11 +1882,12 @@
           s.emit('room:join', { room_id: state.currentRoom });
           _hasRejoined = true;
         }
-      });
-
-      s.on('disconnect', () => {
-        _hasRejoined = false;   // reset so next connect can rejoin
-        setConnBanner('🔴 Disconnected — reconnecting…', '#1a0a0a', '#ff4455');
+        // Re-upload room key on reconnect so new joiners can get it
+        if (state.currentRoom && state.roomKeys[state.currentRoom]) {
+          E2E.exportRoomKey(state.currentRoom).then(jwk => {
+            if (jwk) s.emit('room:key', { room_id: state.currentRoom, key: jwk });
+          });
+        }
       });
 
       s.on('reconnecting', (attempt) => {
@@ -2489,21 +2535,38 @@
     async function addMessage(msg, live) {
       // Decrypt encrypted messages
       if (msg.encrypted) {
-        console.log(`[Decrypt] msg.to: ${msg.to}, currentRoom: ${state.currentRoom}, roomKeys:`, Object.keys(state.roomKeys));
-        // Room message: msg.to is a room_id (8-char hex like "A3F9B2C1")
-        // DM: msg.to is a display name like "Alice#AB12"
         const isRoomMsg = msg.to && state.roomKeys[msg.to] !== undefined;
+        const isRoomTarget = msg.to && (msg.to === state.currentRoom ||
+          (msg.to.length === 8 && /^[0-9A-F]{8}$/i.test(msg.to)));
 
         if (isRoomMsg) {
-          console.log(`[Decrypt] Decrypting room message for ${msg.to}`);
+          // Key available — decrypt now
           const plaintext = await E2E.decryptRoom(msg.encrypted, msg.to);
-          msg = { ...msg, text: plaintext !== null ? plaintext : '🔒 [encrypted — key not available]' };
+          msg = { ...msg, text: plaintext !== null ? plaintext : '🔒 [decryption failed]' };
+        } else if (isRoomTarget && !isRoomMsg) {
+          // Room message but key not yet available — buffer it
+          if (!state.pendingDecrypt[msg.to]) state.pendingDecrypt[msg.to] = [];
+          state.pendingDecrypt[msg.to].push(msg);
+          // Show a placeholder that will be replaced when key arrives
+          const placeholder = { ...msg, text: '⏳ waiting for encryption key…', _pending: true };
+          const chatId = msg.to;
+          if (!state.chatMessages[chatId]) state.chatMessages[chatId] = [];
+          state.chatMessages[chatId].push(placeholder);
+          updatePreview(chatId, placeholder);
+          if (chatId === state.currentChat) { renderMsg(placeholder); if (live) scrollToBottom(); }
+          return;
         } else if (msg.to !== 'global') {
-          console.log(`[Decrypt] Decrypting DM`);
+          // DM decryption
           const peer = msg.from === state.display ? msg.to : msg.from;
           const plaintext = await E2E.decrypt(msg.encrypted, peer);
           msg = { ...msg, text: plaintext !== null ? plaintext : '🔒 [encrypted — key not available]' };
         }
+      }
+
+      // Mark own messages as delivered when we receive them back from server
+      if (msg.msg_id && msg.from === state.display && state.msgStatus[msg.msg_id] === 'sending') {
+        state.msgStatus[msg.msg_id] = 'delivered';
+        _updateMsgStatus(msg.msg_id, '✅');
       }
 
       // Determine chatId: room messages use room_id as chatId
@@ -2575,10 +2638,17 @@
         bubble.appendChild(text);
       }
 
-      // Time
+      // Time + status tick (own messages only)
       const time = document.createElement('div');
       time.className = 'bubble-time';
-      time.textContent = formatTime(msg.time);
+      if (isMe && msg.msg_id) {
+        const status = state.msgStatus[msg.msg_id];
+        time.textContent = formatTime(msg.time) + (status === 'delivered' ? ' ✅' : ' ⏳');
+        time.dataset.msgId = msg.msg_id;
+        time.id = 'status-' + msg.msg_id;
+      } else {
+        time.textContent = formatTime(msg.time);
+      }
       bubble.appendChild(time);
 
       // Vote-to-hide button (only on others' messages in global chat)
@@ -2696,6 +2766,14 @@
       el.scrollTop = el.scrollHeight;
     }
 
+    function _updateMsgStatus(msgId, tick) {
+      const el = document.getElementById('status-' + msgId);
+      if (el) {
+        const time = el.textContent.replace(/ [⏳✅]$/, '');
+        el.textContent = time + ' ' + tick;
+      }
+    }
+
     function formatTime(ts) {
       return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
@@ -2749,6 +2827,9 @@
 
       state.socket.emit('send_message', payload);
       state.socket.emit('stop_typing', { to: state.currentChat });
+
+      // Track sending status — will be updated to ✅ when server echoes it back
+      if (payload.msg_id) state.msgStatus[payload.msg_id] = 'sending';
 
       // Restore send button
       if (sendBtn) {
@@ -3117,12 +3198,33 @@
     function showRoomIdBanner(roomId) {
       const banner = document.getElementById('room-id-banner');
       document.getElementById('room-id-display').textContent = roomId;
+      document.getElementById('room-key-fingerprint').textContent = '—';
       banner.style.display = 'flex';
     }
 
     function hideRoomIdBanner() {
       document.getElementById('room-id-banner').style.display = 'none';
       document.getElementById('room-id-display').textContent = '';
+      document.getElementById('room-key-fingerprint').textContent = '—';
+      document.getElementById('debug-panel').style.display = 'none';
+    }
+
+    function toggleDebugPanel() {
+      const p = document.getElementById('debug-panel');
+      p.style.display = p.style.display === 'none' ? 'block' : 'none';
+      if (p.style.display === 'block') refreshDebug();
+    }
+
+    function refreshDebug() {
+      const roomId = state.currentRoom;
+      document.getElementById('dbg-key').textContent =
+        roomId && state.roomKeys[roomId] ? '✅ present' : '❌ missing';
+      document.getElementById('dbg-pending').textContent =
+        roomId ? (state.pendingDecrypt[roomId] || []).length : 0;
+      document.getElementById('dbg-socket').textContent =
+        state.socket ? (state.socket.connected ? '🟢 connected' : '🔴 disconnected') : '—';
+      document.getElementById('dbg-queue').textContent =
+        Object.values(state.pendingDecrypt).reduce((a, b) => a + b.length, 0);
     }
 
     function copyRoomId() {
@@ -3199,12 +3301,15 @@
       const ttl = document.getElementById('rm-ttl').value;
       const requireApproval = _roomVis === 'private' &&
         document.getElementById('rm-require-approval').checked;
-      state.socket.emit('room:create', {
-        name,
-        visibility: _roomVis,
-        password: _roomVis === 'private' ? password : '',
-        ttl,
-        require_approval: requireApproval,
+      // Hash password before sending — server never sees plaintext
+      _hashPassword(_roomVis === 'private' ? password : '').then(hashed => {
+        state.socket.emit('room:create', {
+          name,
+          visibility: _roomVis,
+          password: hashed,
+          ttl,
+          require_approval: requireApproval,
+        });
       });
       closeRoomModal();
     }
@@ -3213,8 +3318,17 @@
       const roomId = document.getElementById('rm-join-id').value.trim().toUpperCase();
       const password = document.getElementById('rm-join-password').value.trim();
       if (!roomId) { document.getElementById('rm-join-id').focus(); return; }
-      state.socket.emit('room:join_private', { room_id: roomId, password });
+      // Hash password before sending — server never sees plaintext
+      _hashPassword(password).then(hashed => {
+        state.socket.emit('room:join_private', { room_id: roomId, password: hashed });
+      });
       closeRoomModal();
+    }
+
+    async function _hashPassword(pw) {
+      if (!pw) return '';
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pw));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
     // Close modal on backdrop click
