@@ -1380,6 +1380,20 @@
           </div>
         </div>
 
+        <!-- Private room ID banner — shown only for private rooms, stays visible -->
+        <div id="room-id-banner" style="display:none;align-items:center;justify-content:center;
+             gap:10px;padding:6px 16px;background:rgba(0,255,136,0.07);
+             border-bottom:1px solid rgba(0,255,136,0.2);flex-shrink:0;">
+          <span style="font-size:12px;color:var(--text-secondary);">🔑 Room ID:</span>
+          <code id="room-id-display" style="font-family:monospace;font-size:13px;font-weight:700;
+               color:var(--accent);letter-spacing:2px;"></code>
+          <button onclick="copyRoomId()" id="copy-room-id-btn" style="background:rgba(0,255,136,0.15);border:1px solid rgba(0,255,136,0.4);
+                   color:var(--accent);border-radius:6px;padding:3px 10px;font-size:12px;
+                   cursor:pointer;font-weight:600;transition:all 0.2s;">
+            📋 Copy
+          </button>
+        </div>
+
         <div id="messages"></div>
         <div id="typing-indicator"></div>
 
@@ -2032,11 +2046,14 @@
 
         showToast(`Room "${data.name}" created`);
 
-        // For private rooms, show the room ID so the creator can share it
+        // For private rooms, show the persistent room ID banner
         if (data.visibility === 'private') {
+          showRoomIdBanner(data.room_id);
           setTimeout(() => {
             showToast(`🔑 Room ID: ${data.room_id} — share this to invite people`);
           }, 1500);
+        } else {
+          hideRoomIdBanner();
         }
 
         // Generate a session key for this room and upload it to the server.
@@ -2095,6 +2112,12 @@
         if (data.is_frozen) {
           showToast('⚠️ This room is frozen — messages are disabled');
         }
+        // Show room ID banner for private rooms
+        if (data.visibility === 'private') {
+          showRoomIdBanner(data.room_id);
+        } else {
+          hideRoomIdBanner();
+        }
       });
 
       // Receive a room session key distributed after we joined
@@ -2115,6 +2138,7 @@
         }
         state.currentRoom = null;
         state.currentRoomName = '';
+        hideRoomIdBanner();
         switchChat('global');
       });
 
@@ -2952,6 +2976,9 @@
       document.getElementById('chat-placeholder').style.display = 'none';
       document.getElementById('active-chat').style.display = 'flex';
 
+      // Hide room ID banner when not in a private room
+      if (!isRoom) hideRoomIdBanner();
+
       // Clear unread
       state.unread[chatId] = 0;
       const item2 = document.getElementById('chat-item-' + chatId) ||
@@ -3078,6 +3105,35 @@
         const name = item.querySelector('.chat-item-name')?.textContent.toLowerCase() || '';
         // Use includes for substring match; handles accented chars reasonably
         item.style.display = name.includes(query) ? '' : 'none';
+      });
+    }
+
+    // ─── ROOM ID BANNER ───────────────────────────────────────
+    function showRoomIdBanner(roomId) {
+      const banner = document.getElementById('room-id-banner');
+      document.getElementById('room-id-display').textContent = roomId;
+      banner.style.display = 'flex';
+    }
+
+    function hideRoomIdBanner() {
+      document.getElementById('room-id-banner').style.display = 'none';
+      document.getElementById('room-id-display').textContent = '';
+    }
+
+    function copyRoomId() {
+      const roomId = document.getElementById('room-id-display').textContent;
+      if (!roomId) return;
+      navigator.clipboard.writeText(roomId).then(() => {
+        const btn = document.getElementById('copy-room-id-btn');
+        btn.textContent = '✓ Copied!';
+        btn.style.background = 'rgba(0,255,136,0.3)';
+        setTimeout(() => {
+          btn.textContent = '📋 Copy';
+          btn.style.background = 'rgba(0,255,136,0.15)';
+        }, 2000);
+      }).catch(() => {
+        // Fallback for browsers that block clipboard
+        prompt('Copy this Room ID:', roomId);
       });
     }
 
