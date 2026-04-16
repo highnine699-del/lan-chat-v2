@@ -1726,6 +1726,7 @@
       msgStatus: {},       // tempId -> 'sending'|'delivered'
       tempIdMap: {},       // tempId -> DOM element id (for status updates)
       offlineQueue: [],    // messages queued while disconnected
+      preJoinQueue: [],    // messages that arrived before identity was confirmed
     };
 
     // ─── E2E ENCRYPTION ───────────────────────────────────────────────
@@ -1980,17 +1981,19 @@
           uid: state.uid,
           publicKey: state.myPublicKeyJwk,
         });
-        // Rejoin room only once per connection cycle — guard prevents duplicates
+        // Rejoin room on every connect cycle (disconnect resets _hasRejoined)
         if (state.currentRoom && !_hasRejoined) {
           s.emit('room:join', { room_id: state.currentRoom });
           _hasRejoined = true;
         }
-        // Re-upload room key on reconnect so new joiners can get it
+        // Re-upload room key if we have it, so other members get it after reconnect
         if (state.currentRoom && state.roomKeys[state.currentRoom]) {
           E2E.exportRoomKey(state.currentRoom).then(jwk => {
             if (jwk) s.emit('room:key', { room_id: state.currentRoom, key: jwk });
           });
         }
+        // If we're in a room but lost the key (server restarted),
+        // room:joined from the rejoin above will deliver the key back.
         // Flush offline message queue
         if (state.offlineQueue.length) {
           const queued = [...state.offlineQueue];
@@ -2002,9 +2005,14 @@
         }
       });
 
-      s.on('reconnecting', (attempt) => {
+      s.on('disconnect', () => {
+        _hasRejoined = false;   // reset so next connect can rejoin
         debugState.connected = false;
         updateDebugPanel();
+        setConnBanner('🔴 Disconnected — reconnecting…', '#1a0a0a', '#ff4455');
+      });
+
+      s.on('reconnecting', (attempt) => {
         setConnBanner(`🟡 Reconnecting… (${attempt}/10)`, '#1a1500', '#f0b429');
       });
 
@@ -2042,6 +2050,18 @@
         // Update debug state with confirmed identity
         debugState.userId = state.display;
         updateDebugPanel();
+
+        // Flush any messages that arrived before identity was confirmed
+        if (state.preJoinQueue.length) {
+          const queued = [...state.preJoinQueue];
+          state.preJoinQueue = [];
+          queued.forEach(msg => {
+            addMessage(msg, true);
+            if (msg.from !== state.display) {
+              notifyNewMessage(msg.from, msg.text || msg.name || '[File]');
+            }
+          });
+        }
       });
 
       // Receive a peer's public key
@@ -2104,6 +2124,11 @@
       });
 
       s.on('new_message', msg => {
+        // If identity not yet confirmed (reconnect race), buffer the message
+        if (!state.display) {
+          state.preJoinQueue.push(msg);
+          return;
+        }
         addMessage(msg, true);
 
         // Notify about new message
@@ -2239,23 +2264,24 @@
       });
 
       s.on('room:joined', async data => {
+        // Set currentRoom FIRST so incoming messages during key import
+        // are correctly identified as room messages and buffered in pendingDecrypt
         state.currentRoom = data.room_id;
         state.currentRoomName = data.name;
         state.currentChat = data.room_id;
 
         if (!state.chatMessages[data.room_id]) state.chatMessages[data.room_id] = [];
 
-        // Import the room session key if the server provided one
+        // Import the room session key BEFORE rendering history.
+        // importRoomKey will flush pendingDecrypt automatically when done.
         if (data.session_key) {
-          console.log(`[E2E] Importing room key for ${data.room_id}`);
           try {
             await E2E.importRoomKey(data.room_id, data.session_key);
           } catch (err) {
             console.error('[E2E] Failed to import room key:', err);
           }
-        } else {
-          console.warn(`[E2E] No session_key in room:joined for ${data.room_id}`);
         }
+        // If no key in payload, it will arrive via room:key event shortly.
 
         // Switch the chat view to this room
         document.getElementById('chat-placeholder').style.display = 'none';
@@ -2654,8 +2680,14 @@
       // Decrypt encrypted messages
       if (msg.encrypted) {
         const isRoomMsg = msg.to && state.roomKeys[msg.to] !== undefined;
-        const isRoomTarget = msg.to && (msg.to === state.currentRoom ||
-          (msg.to.length === 8 && /^[0-9A-F]{8}$/i.test(msg.to)));
+        // A message is a room target if:
+        // 1. msg.to matches our current room, OR
+        // 2. msg.to is an 8-char hex room ID format (even if key not yet loaded)
+        const isRoomTarget = msg.to && (
+          msg.to === state.currentRoom ||
+          state.roomKeys[msg.to] !== undefined ||
+          /^[0-9A-F]{8}$/i.test(msg.to)
+        );
 
         if (isRoomMsg) {
           // Key available — decrypt now
@@ -2667,7 +2699,7 @@
           // Room message but key not yet available — buffer it
           if (!state.pendingDecrypt[msg.to]) state.pendingDecrypt[msg.to] = [];
           state.pendingDecrypt[msg.to].push(msg);
-          // Show a placeholder that will be replaced when key arrives
+          // Show a placeholder
           const placeholder = { ...msg, text: '⏳ waiting for encryption key…', _pending: true };
           const chatId = msg.to;
           if (!state.chatMessages[chatId]) state.chatMessages[chatId] = [];
