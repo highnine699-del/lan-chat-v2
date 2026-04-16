@@ -1401,6 +1401,10 @@
             Key: <code id="room-key-fingerprint"
               style="font-family:monospace;color:var(--text-secondary);font-size:11px;">—</code>
           </span>
+          <button onclick="rotateRoomKey()" title="Rotate encryption key (admin only)" style="background:none;border:1px solid rgba(0,255,136,0.3);color:var(--text-muted);
+                   border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">
+            🔄 Rotate key
+          </button>
         </div>
 
         <div id="messages"></div>
@@ -1676,7 +1680,9 @@
       currentRoomName: '', // display name of the active room (for header fallback)
       // ── Reliability ─────────────────────────────────────────────────
       pendingDecrypt: {},  // room_id -> [msg, ...] buffered until key arrives
-      msgStatus: {},       // msg_id -> 'sending'|'delivered'
+      msgStatus: {},       // tempId -> 'sending'|'delivered'
+      tempIdMap: {},       // tempId -> DOM element id (for status updates)
+      offlineQueue: [],    // messages queued while disconnected
     };
 
     // ─── E2E ENCRYPTION ───────────────────────────────────────────────
@@ -1941,6 +1947,15 @@
           E2E.exportRoomKey(state.currentRoom).then(jwk => {
             if (jwk) s.emit('room:key', { room_id: state.currentRoom, key: jwk });
           });
+        }
+        // Flush offline message queue
+        if (state.offlineQueue.length) {
+          const queued = [...state.offlineQueue];
+          state.offlineQueue = [];
+          queued.forEach(payload => {
+            s.emit('send_message', payload);
+          });
+          showToast(`📤 Sent ${queued.length} queued message${queued.length > 1 ? 's' : ''}`);
         }
       });
 
@@ -2624,10 +2639,26 @@
         }
       }
 
-      // Mark own messages as delivered when we receive them back from server
-      if (msg.msg_id && msg.from === state.display && state.msgStatus[msg.msg_id] === 'sending') {
+      // Mark own messages as delivered when we receive them back from server.
+      // The server echo has the real msg_id; our local copy used a tempId.
+      // Find and update the local copy instead of adding a duplicate.
+      if (msg.msg_id && msg.from === state.display && !msg._local) {
+        // Look for a local temp message to replace
+        const chatId2 = msg.to === 'global' ? 'global'
+          : (msg.to === state.currentRoom || state.roomKeys[msg.to]) ? msg.to
+            : (msg.from === state.display ? msg.to : msg.from);
+        const msgs = state.chatMessages[chatId2] || [];
+        const localIdx = msgs.findIndex(m => m._local && m.text === (msg._origText || msg.text));
+        if (localIdx !== -1) {
+          // Replace temp with real, update status tick
+          const tempId = msgs[localIdx].msg_id;
+          msgs[localIdx] = { ...msg, _origText: undefined };
+          state.msgStatus[msg.msg_id] = 'delivered';
+          _updateMsgStatus(tempId, '✅', msg.msg_id);
+          return; // don't re-render
+        }
+        // No local copy found (e.g. history replay) — just mark delivered
         state.msgStatus[msg.msg_id] = 'delivered';
-        _updateMsgStatus(msg.msg_id, '✅');
       }
 
       // Determine chatId: room messages use room_id as chatId
@@ -2638,7 +2669,14 @@
           : (msg.from === state.display ? msg.to : msg.from);
 
       if (!state.chatMessages[chatId]) state.chatMessages[chatId] = [];
-      state.chatMessages[chatId].push(msg);
+      // Insert in timestamp order to handle out-of-order delivery
+      const arr = state.chatMessages[chatId];
+      const insertAt = arr.findIndex(m => m.time > msg.time);
+      if (insertAt === -1) {
+        arr.push(msg);
+      } else {
+        arr.splice(insertAt, 0, msg);
+      }
 
       // Update sidebar preview
       updatePreview(chatId, msg);
@@ -2827,11 +2865,12 @@
       el.scrollTop = el.scrollHeight;
     }
 
-    function _updateMsgStatus(msgId, tick) {
+    function _updateMsgStatus(msgId, tick, newId) {
       const el = document.getElementById('status-' + msgId);
       if (el) {
-        const time = el.textContent.replace(/ [⏳✅]$/, '');
+        const time = el.textContent.replace(/ [⏳✅🟡]$/, '');
         el.textContent = time + ' ' + tick;
+        if (newId) el.id = 'status-' + newId;  // re-key to real server msg_id
       }
     }
 
@@ -2845,58 +2884,54 @@
       const text = input.value.trim();
       if (!text) return;
 
-      // ── "Sending…" feedback for slow mobile networks ──────────────────────
-      // Clear input immediately so the user knows it was accepted,
-      // then show a temporary "sending" indicator in the chat.
       input.value = '';
       input.style.height = 'auto';
 
       const sendBtn = document.querySelector('.send-btn');
-      if (sendBtn) {
-        sendBtn.style.opacity = '0.5';
-        sendBtn.disabled = true;
-      }
+      if (sendBtn) { sendBtn.style.opacity = '0.5'; sendBtn.disabled = true; }
 
-      let payload = { to: state.currentChat, text };
+      // Generate a client-side temp ID so we can track delivery
+      const tempId = 'tmp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
 
-      console.log(`[Send] currentChat: ${state.currentChat}, currentRoom: ${state.currentRoom}`);
+      let payload = { to: state.currentChat, text, _tempId: tempId };
 
       // Encrypt private DMs end-to-end (ECDH-derived shared key)
       if (state.currentChat !== 'global' && !state.currentRoom) {
-        console.log('[Send] Encrypting DM with ECDH');
         const ciphertext = await E2E.encrypt(text, state.currentChat);
-        if (ciphertext) {
-          payload.encrypted = ciphertext;
-          payload.text = '🔒';
-        }
+        if (ciphertext) { payload.encrypted = ciphertext; payload.text = '🔒'; }
       }
 
       // Encrypt room messages with the room session key (AES-GCM)
       if (state.currentRoom && state.roomKeys[state.currentRoom]) {
-        console.log(`[Send] Encrypting room message for ${state.currentRoom}`);
         const ciphertext = await E2E.encryptRoom(text, state.currentRoom);
-        if (ciphertext) {
-          payload.encrypted = ciphertext;
-          payload.text = '🔒';
-          console.log('[Send] Room message encrypted successfully');
-        } else {
-          console.warn('[Send] Room encryption returned null');
-        }
-      } else if (state.currentRoom) {
-        console.warn(`[Send] In room ${state.currentRoom} but no key available`);
+        if (ciphertext) { payload.encrypted = ciphertext; payload.text = '🔒'; }
       }
 
-      state.socket.emit('send_message', payload);
-      state.socket.emit('stop_typing', { to: state.currentChat });
+      // Render the message locally immediately with ⏳ status
+      const localMsg = {
+        type: 'text',
+        from: state.display,
+        color: '',
+        text,
+        time: Date.now(),
+        to: state.currentChat,
+        msg_id: tempId,
+        _local: true,
+        _origText: text,  // keep original for echo matching
+      };
+      state.msgStatus[tempId] = 'sending';
+      await addMessage(localMsg, true);
 
-      // Track sending status — will be updated to ✅ when server echoes it back
-      if (payload.msg_id) state.msgStatus[payload.msg_id] = 'sending';
-
-      // Restore send button
-      if (sendBtn) {
-        sendBtn.style.opacity = '';
-        sendBtn.disabled = false;
+      // If offline, queue for later; otherwise send now
+      if (!state.socket || !state.socket.connected) {
+        state.offlineQueue.push(payload);
+        showToast('📶 Offline — message queued');
+      } else {
+        state.socket.emit('send_message', payload);
+        state.socket.emit('stop_typing', { to: state.currentChat });
       }
+
+      if (sendBtn) { sendBtn.style.opacity = ''; sendBtn.disabled = false; }
     }
 
     function handleKey(e) {
@@ -3280,6 +3315,18 @@
     // Legacy stubs — kept so nothing breaks if called
     function toggleDebugPanel() { if (DEV_MODE) updateDebugPanel(); }
     function refreshDebug() { updateDebugPanel(); }
+
+    async function rotateRoomKey() {
+      if (!state.currentRoom) return;
+      try {
+        await E2E.generateRoomKey(state.currentRoom);
+        const jwk = await E2E.exportRoomKey(state.currentRoom);
+        state.socket.emit('room:key', { room_id: state.currentRoom, key: jwk });
+        showToast('🔄 Room key rotated — new key distributed to members');
+      } catch (err) {
+        showToast('❌ Key rotation failed');
+      }
+    }
 
     function copyRoomId() {
       const roomId = document.getElementById('room-id-display').textContent;
