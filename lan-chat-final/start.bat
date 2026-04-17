@@ -69,6 +69,9 @@ echo.
 echo Bundling offline assets (emoji picker)...
 %PYTHON% download_assets.py
 echo.
+echo Generating PNG icons for PWA/iOS/Android...
+%PYTHON% generate_icons.py
+echo.
 echo Starting LAN Chat server...
 echo.
 

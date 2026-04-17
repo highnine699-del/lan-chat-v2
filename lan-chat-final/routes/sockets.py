@@ -16,6 +16,7 @@ message:send      (legacy: send_message)
 message:send_file (legacy: send_file)
 """
 import json
+import logging
 import os
 import time
 import secrets as _sec
@@ -23,11 +24,15 @@ import secrets as _sec
 from flask import request
 from flask_socketio import emit, join_room, leave_room
 
+log = logging.getLogger('lan-chat')
+
 from config import (
     MAX_MESSAGE_LEN, MAX_SIGNAL_BYTES, UPLOAD_FOLDER,
     HIDE_VOTE_THRESHOLD, SPAM_COOLDOWN_S,
     MAX_ROOM_NAME_LEN, EPHEMERAL_TTLS, JOIN_TOKEN_TTL_S,
     ADMIN_PASSWORD, MAX_CONNECTIONS_PER_IP,
+    PUBLIC_MODE, SERVER_PASSWORD, DEBUG,
+    SPAM_MSG_LIMIT, SPAM_MSG_LIMIT_PUBLIC,
 )
 from state import (
     # core state
@@ -47,7 +52,7 @@ from state import (
     private_key, append_private, now_ms, clean_username,
     generate_tag, reputation_label,
     init_user_state, set_presence,
-    create_room, get_room, is_room_admin,
+    create_room, get_room, update_room, is_room_admin,
     room_member_list, schedule_room_delete, cancel_room_delete,
     check_smart_spam, cooldown_remaining,
     filter_expired, clean_room_name,
@@ -120,6 +125,23 @@ def register_socket_handlers(socketio):
             if sid:
                 emit('new_message', msg, to=sid)
 
+    # ── connect ───────────────────────────────────────────────────────────────
+
+    @socketio.on('connect')
+    def handle_connect():
+        """
+        Socket.IO connection gate.
+        In PUBLIC_MODE we verify a server password is configured.
+        The actual password check happens in handle_join because the password
+        is sent as part of the join payload (not available at raw connect time).
+        We use this handler to reject connections early when PUBLIC_MODE is on
+        but no SERVER_PASSWORD has been configured — fail fast before any state
+        is allocated.
+        """
+        if PUBLIC_MODE and not SERVER_PASSWORD:
+            log.warning('Connection rejected: PUBLIC_MODE=true but SERVER_PASSWORD is not set.')
+            return False   # returning False from connect handler disconnects the socket
+
     # ── join ─────────────────────────────────────────────────────────────────
 
     @socketio.on('join')
@@ -131,6 +153,25 @@ def register_socket_handlers(socketio):
         sid = current_sid()
         if not sid:
             return
+
+        # ── Public mode: server password gate ────────────────────────────────
+        # When PUBLIC_MODE is on, every join must supply the correct password.
+        # Wrong or missing password = hard disconnect (not just non-admin).
+        if PUBLIC_MODE:
+            if not SERVER_PASSWORD:
+                # PUBLIC_MODE=true but no password set — block everyone
+                emit('error', {
+                    'code':    'SERVER_LOCKED',
+                    'message': 'Server is in public mode but no password is configured.',
+                })
+                return
+            client_server_pw = str(data.get('server_password', ''))
+            if client_server_pw != SERVER_PASSWORD:
+                emit('error', {
+                    'code':    'WRONG_PASSWORD',
+                    'message': 'Incorrect server password.',
+                })
+                return
 
         # ── Admin password check ──────────────────────────────────────────────
         # Wrong or missing password = regular user (not blocked).
@@ -326,7 +367,10 @@ def register_socket_handlers(socketio):
         if not text:
             return
 
-        spam_result = check_smart_spam(sid, text)
+        spam_result = check_smart_spam(
+            sid, text,
+            msg_limit=SPAM_MSG_LIMIT_PUBLIC if PUBLIC_MODE else SPAM_MSG_LIMIT,
+        )
         if spam_result == 'cooldown':
             remaining = cooldown_remaining(sid)
             emit('cooldown', {
@@ -370,6 +414,9 @@ def register_socket_handlers(socketio):
         user['msg_count'] = user.get('msg_count', 0) + 1
         analytics['messages_sent'] += 1
 
+        if DEBUG:
+            log.debug('send_message from=%s to=%s text=%r', user['display'], target, text[:80])
+
         msg_id = _sec.token_hex(8)
         msg = {
             'type':       'text',
@@ -409,6 +456,8 @@ def register_socket_handlers(socketio):
         user = current_user()
         if not user:
             return
+
+        sid = current_sid()
 
         url = str(data.get('url', ''))
         if not url.startswith('/uploads/'):
@@ -471,11 +520,15 @@ def register_socket_handlers(socketio):
         if not msg_id or not new_text or not target:
             return
 
-        # Authorisation: sender or room admin
+        # Authorisation: sender (verified server-side) or room admin.
+        # We look up the stored message to confirm ownership — never trust
+        # the client-supplied 'from' field.
         is_admin = target in rooms and is_room_admin(sid, target)
-        if not is_admin and data.get('from') != user['display']:
-            emit('error', {'code': 'FORBIDDEN', 'message': 'Cannot edit this message.'})
-            return
+        if not is_admin:
+            stored_msg = _find_message(msg_id, target)
+            if stored_msg is None or stored_msg.get('from') != user['display']:
+                emit('error', {'code': 'FORBIDDEN', 'message': 'Cannot edit this message.'})
+                return
 
         payload = {
             'msg_id':  msg_id,
@@ -518,9 +571,11 @@ def register_socket_handlers(socketio):
             return
 
         is_admin = target in rooms and is_room_admin(sid, target)
-        if not is_admin and data.get('from') != user['display']:
-            emit('error', {'code': 'FORBIDDEN', 'message': 'Cannot delete this message.'})
-            return
+        if not is_admin:
+            stored_msg = _find_message(msg_id, target)
+            if stored_msg is None or stored_msg.get('from') != user['display']:
+                emit('error', {'code': 'FORBIDDEN', 'message': 'Cannot delete this message.'})
+                return
 
         payload = {'msg_id': msg_id, 'to': target}
 
@@ -757,7 +812,7 @@ def register_socket_handlers(socketio):
         if not isinstance(key_jwk, dict):
             return
 
-        room['session_key'] = key_jwk
+        update_room(room_id, session_key=key_jwk)
 
         # Distribute to all current members except the creator
         for member_sid in room['members']:
@@ -873,7 +928,7 @@ def register_socket_handlers(socketio):
         room = get_room(room_id)
         if not room:
             return
-        room['require_approval'] = enabled
+        update_room(room_id, require_approval=enabled)
 
     # ── room:knock_approve / room:knock_deny ──────────────────────────────────
 
@@ -1070,7 +1125,7 @@ def register_socket_handlers(socketio):
         if not room:
             return
 
-        room['is_frozen'] = freeze
+        update_room(room_id, is_frozen=freeze)
         status = 'frozen' if freeze else 'unfrozen'
         emit('room:frozen', {'room_id': room_id, 'is_frozen': freeze}, to=room_id)
         emit('system_message',
@@ -1161,8 +1216,17 @@ def register_socket_handlers(socketio):
 
         target = str(data.get('to', ''))
         if target in sid_map:
+            target_sid = sid_map[target]
+            # Validate the SID is still in the active users dict (not a stale entry)
+            if target_sid not in users:
+                sid_map.pop(target, None)   # clean up stale mapping
+                emit('webrtc_signal', {
+                    'type':  'error',
+                    'error': f'User "{target}" has disconnected',
+                })
+                return
             data['from'] = user['display']
-            emit('webrtc_signal', data, to=sid_map[target])
+            emit('webrtc_signal', data, to=target_sid)
         else:
             emit('webrtc_signal', {
                 'type':  'error',
@@ -1311,6 +1375,31 @@ def register_socket_handlers(socketio):
         emit('room:members', room_member_list(room_id), to=room_id)
         if not room['members']:
             schedule_room_delete(room_id, socketio)
+
+    def _find_message(msg_id: str, target: str) -> dict | None:
+        """
+        Look up a stored message by msg_id in the appropriate history store.
+        Returns the message dict or None if not found.
+        Used for server-side ownership verification in edit/delete.
+        """
+        if target == 'global':
+            for m in message_history:
+                if m.get('msg_id') == msg_id:
+                    return m
+        elif target in rooms:
+            for m in rooms[target]['messages']:
+                if m.get('msg_id') == msg_id:
+                    return m
+        else:
+            # DM — check both orderings of the private key
+            user = current_user()
+            if user:
+                key = private_key(user['display'], target)
+                hist = private_history.get(key, [])
+                for m in hist:
+                    if m.get('msg_id') == msg_id:
+                        return m
+        return None
 
     def _public_room_list() -> list:
         """

@@ -903,31 +903,61 @@ function connectSocket() {
     const callType = data.call_type === 'video' ? '📹 video' : '📞 voice';
     notifyIncomingCall(data.from, data.call_type);
 
-    // Show a persistent toast with Accept button
-    const toastEl = document.getElementById('toast');
-    toastEl.innerHTML = '';
+    // Use a dedicated call-banner element so it never conflicts with the
+    // shared toast queue (knock toasts, message toasts, etc.)
+    let banner = document.getElementById('call-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'call-banner';
+      banner.style.cssText = [
+        'position:fixed', 'top:16px', 'left:50%', 'transform:translateX(-50%)',
+        'background:#0d2a1f', 'border:1.5px solid var(--accent)',
+        'color:var(--text-primary)', 'padding:10px 18px', 'border-radius:12px',
+        'z-index:9999', 'display:flex', 'align-items:center', 'gap:8px',
+        'box-shadow:0 4px 24px rgba(0,255,136,0.25)', 'font-size:14px',
+        'max-width:90vw', 'opacity:0', 'transition:opacity 0.2s',
+      ].join(';');
+      document.body.appendChild(banner);
+    }
+
+    // Clear any previous call-banner timer
+    if (banner._dismissTimer) clearTimeout(banner._dismissTimer);
+
+    banner.innerHTML = '';
     const msg = document.createElement('span');
     msg.textContent = `${data.from} started a ${callType} call in "${data.room_name}" `;
     const btn = document.createElement('button');
     btn.textContent = 'Join';
-    btn.style.cssText = 'margin-left:8px;padding:3px 10px;border-radius:8px;' +
-      'background:var(--accent);color:#0a0e13;border:none;cursor:pointer;font-weight:700;';
+    btn.style.cssText = 'padding:4px 12px;border-radius:8px;' +
+      'background:var(--accent);color:#0a0e13;border:none;cursor:pointer;font-weight:700;flex-shrink:0;';
     btn.onclick = () => {
-      toastEl.classList.remove('show');
+      banner.style.opacity = '0';
+      setTimeout(() => { banner.style.display = 'none'; }, 200);
       if (state.callState !== 'idle') {
         showToast('⚠️ Already in a call — end it first.');
         return;
       }
-      // Dial the caller directly (DM-style 1-to-1 WebRTC connection).
-      // We must NOT go through the room branch of startCall, so we
-      // set callTarget and call startDmCall directly.
       startDmCall(data.from, data.call_type);
     };
-    toastEl.appendChild(msg);
-    toastEl.appendChild(btn);
-    toastEl.classList.add('show');
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕';
+    closeBtn.style.cssText = 'padding:2px 8px;border-radius:6px;background:transparent;' +
+      'color:var(--text-secondary);border:none;cursor:pointer;font-size:12px;flex-shrink:0;';
+    closeBtn.onclick = () => {
+      banner.style.opacity = '0';
+      setTimeout(() => { banner.style.display = 'none'; }, 200);
+    };
+    banner.appendChild(msg);
+    banner.appendChild(btn);
+    banner.appendChild(closeBtn);
+    banner.style.display = 'flex';
+    requestAnimationFrame(() => { banner.style.opacity = '1'; });
+
     // Auto-dismiss after 30s
-    setTimeout(() => toastEl.classList.remove('show'), 30000);
+    banner._dismissTimer = setTimeout(() => {
+      banner.style.opacity = '0';
+      setTimeout(() => { banner.style.display = 'none'; }, 200);
+    }, 30000);
   });
 
   // ── Room knock events ─────────────────────────────────────────────────
@@ -1117,36 +1147,47 @@ function playRingTone() {
   stopRingTone(); // cancel any previous ring
   try {
     const ctx = getAudioCtx();
-    const ringDuration = 0.5;
-    const silenceDuration = 0.5;
-    const repeatCount = 6;
     const oscillators = [];
 
-    for (let i = 0; i < repeatCount; i++) {
-      const startTime = ctx.currentTime + i * (ringDuration + silenceDuration);
+    // Classic telephone double-ring pattern: RING-RING ... pause ... RING-RING
+    // Each "ring" = two 0.4s bursts separated by 0.2s gap; then 1.6s silence. Repeats 5×.
+    const burst = 0.4;   // duration of one tone burst
+    const gap = 0.2;   // gap between the two bursts in a double-ring
+    const pause = 1.6;   // silence between double-rings
+    const cycle = burst + gap + burst + pause; // 2.6 s per cycle
+    const repeats = 5;
 
-      [800, 1200].forEach(freq => {
+    function makeBurst(startTime) {
+      // Layer three harmonics for a warm, telephone-like timbre
+      const freqs = [
+        { f: 480, vol: 0.22, type: 'sine' },
+        { f: 960, vol: 0.10, type: 'sine' },
+        { f: 1440, vol: 0.05, type: 'triangle' },
+      ];
+      freqs.forEach(({ f, vol, type }) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-
         osc.connect(gain);
         gain.connect(ctx.destination);
-
-        osc.frequency.value = freq;
-        osc.type = 'sine';
-
+        osc.frequency.value = f;
+        osc.type = type;
+        // Quick attack, sustain, quick release
         gain.gain.setValueAtTime(0, startTime);
-        gain.gain.linearRampToValueAtTime(0.2, startTime + 0.05);
-        gain.gain.setValueAtTime(0.2, startTime + ringDuration - 0.1);
-        gain.gain.linearRampToValueAtTime(0, startTime + ringDuration);
-
+        gain.gain.linearRampToValueAtTime(vol, startTime + 0.02);
+        gain.gain.setValueAtTime(vol, startTime + burst - 0.04);
+        gain.gain.linearRampToValueAtTime(0, startTime + burst);
         osc.start(startTime);
-        osc.stop(startTime + ringDuration);
+        osc.stop(startTime + burst);
         oscillators.push(osc);
       });
     }
 
-    // Register stop function so the ring can be cancelled early
+    for (let i = 0; i < repeats; i++) {
+      const base = ctx.currentTime + i * cycle;
+      makeBurst(base);               // first burst
+      makeBurst(base + burst + gap); // second burst (double-ring)
+    }
+
     _ringStopFns.push(() => {
       oscillators.forEach(o => { try { o.stop(); } catch (_) { } });
     });
@@ -2738,7 +2779,15 @@ if (data.type === 'offer') {
     const acceptBtn = document.getElementById('accept-btn');
     const rejectBtn = document.getElementById('reject-btn');
 
+    // 60s callee timeout — if caller disappears mid-ring, close the overlay
+    const calleeTimeout = setTimeout(() => {
+      acceptBtn.removeEventListener('click', handleAccept);
+      rejectBtn.removeEventListener('click', handleReject);
+      resolve(false);
+    }, 60000);
+
     const handleAccept = () => {
+      clearTimeout(calleeTimeout);
       stopRingTone();   // stop ring immediately on accept
       acceptBtn.removeEventListener('click', handleAccept);
       rejectBtn.removeEventListener('click', handleReject);
@@ -2746,6 +2795,7 @@ if (data.type === 'offer') {
     };
 
     const handleReject = () => {
+      clearTimeout(calleeTimeout);
       acceptBtn.removeEventListener('click', handleAccept);
       rejectBtn.removeEventListener('click', handleReject);
       resolve(false);
@@ -3021,6 +3071,24 @@ if (data.type === 'offer') {
 } // end handleSignal
 
 // ─── WebRTC STATS MONITOR ─────────────────────────────────────────
+let _lastAudioBytes = 0;
+let _noAudioWarned = false;
+
+function _showCallWarning(msg) {
+  const el = document.getElementById('call-status');
+  if (el && !el.dataset.warning) {
+    el.dataset.warning = '1';
+    const prev = el.textContent;
+    el.textContent = msg;
+    el.style.color = '#ffaa00';
+    setTimeout(() => {
+      el.textContent = prev;
+      el.style.color = '';
+      delete el.dataset.warning;
+    }, 5000);
+  }
+}
+
 async function monitorWebRTCStats() {
   if (!state.peerConnection || state.callState !== 'connected') return;
 
@@ -3039,10 +3107,24 @@ async function monitorWebRTCStats() {
     });
 
     if (audioStats) {
-      console.log('[WebRTC-Stats] Audio - Received:', audioStats.bytesReceived, 'packets:', audioStats.packetsReceived);
-      if (audioStats.bytesReceived === 0) {
-        console.warn('[WebRTC-Stats] ⚠️ No audio data received! Check if remote is sending audio.');
+      const bytesNow = audioStats.bytesReceived || 0;
+      const packetsLost = audioStats.packetsLost || 0;
+      const packetsReceived = audioStats.packetsReceived || 1;
+      const lossRate = packetsLost / (packetsLost + packetsReceived);
+
+      if (bytesNow === _lastAudioBytes && bytesNow > 0 && !_noAudioWarned) {
+        _noAudioWarned = true;
+        _showCallWarning('⚠️ No audio received — check remote mic');
+      } else if (bytesNow > _lastAudioBytes) {
+        _noAudioWarned = false;
       }
+      _lastAudioBytes = bytesNow;
+
+      if (lossRate > 0.1) {
+        _showCallWarning(`⚠️ Poor connection — ${Math.round(lossRate * 100)}% packet loss`);
+      }
+
+      console.log('[WebRTC-Stats] Audio bytes:', bytesNow, 'loss:', Math.round(lossRate * 100) + '%');
     } else {
       console.warn('[WebRTC-Stats] No audio stats yet (still connecting or no audio track)');
     }
@@ -3052,7 +3134,7 @@ async function monitorWebRTCStats() {
     }
 
     if (candidatePair) {
-      console.log('[WebRTC-Stats] ICE - Current bitrate:', candidatePair.availableOutgoingBitrate.toFixed(0), 'bps');
+      console.log('[WebRTC-Stats] ICE - Current bitrate:', (candidatePair.availableOutgoingBitrate || 0).toFixed(0), 'bps');
     }
   } catch (err) {
     console.warn('[WebRTC-Stats] Error:', err.message);
@@ -3079,6 +3161,8 @@ function endCall() {
   console.log('[Call] Ending call');
   stopRingTone();   // cancel any active ring tone immediately
   stopStatsMonitoring();
+  _lastAudioBytes = 0;
+  _noAudioWarned = false;
 
   // Clear ICE candidate buffer
   state.iceCandidateBuffer = [];
@@ -3140,9 +3224,13 @@ function endCall() {
   state.muted = false;
   state.camOff = false;
 
-  // Reset button states
-  document.getElementById('mute-btn').textContent = '🎙️';
-  document.getElementById('cam-btn').textContent = '📷';
+  // Reset button SVG icons to their default (unmuted / cam-on) state
+  const muteIcon = document.getElementById('mute-icon');
+  if (muteIcon) muteIcon.innerHTML = '<path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm0 2a2 2 0 0 0-2 2v7a2 2 0 0 0 4 0V5a2 2 0 0 0-2-2zm-7 8a1 1 0 0 1 1 1 6 6 0 0 0 12 0 1 1 0 0 1 2 0 8 8 0 0 1-7 7.93V21h2a1 1 0 0 1 0 2H9a1 1 0 0 1 0-2h2v-1.07A8 8 0 0 1 4 12a1 1 0 0 1 1-1z"/>';
+  const camIcon = document.getElementById('cam-icon');
+  if (camIcon) camIcon.innerHTML = '<path d="M15 8H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1.5l4 2.5V9l-4 2.5V10a2 2 0 0 0-2-2z"/>';
+  document.getElementById('mute-btn')?.classList.remove('active-mute');
+  document.getElementById('cam-btn')?.classList.remove('cam-off');
 }
 
 function toggleMute() {

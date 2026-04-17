@@ -248,3 +248,48 @@ def upload():
         'name': file.filename,
         'type': file.content_type or 'application/octet-stream',
     })
+
+@http_bp.route('/shutdown', methods=['POST'])
+def shutdown():
+    """
+    Graceful server shutdown — admin only.
+
+    Protected by X-Admin-Key header matching ADMIN_PASSWORD.
+    Broadcasts a shutdown notice to all connected clients,
+    then terminates the process cleanly after a short delay.
+    """
+    from config import ADMIN_PASSWORD
+    from state import admin_state
+
+    if not ADMIN_PASSWORD:
+        return jsonify({'error': 'Shutdown endpoint is disabled (no ADMIN_PASSWORD set).'}), 403
+
+    provided = request.headers.get('X-Admin-Key', '')
+    if provided != ADMIN_PASSWORD:
+        return jsonify({'error': 'Forbidden'}), 403
+
+    import threading
+    import logging
+    log = logging.getLogger('lan-chat')
+    log.info('Graceful shutdown requested via /shutdown')
+
+    def _do_shutdown():
+        import time as _time
+        # Import socketio reference from the app context
+        try:
+            from flask import current_app
+            socketio = current_app.extensions.get('socketio')
+            if socketio:
+                socketio.emit('server_shutdown', {
+                    'message': '⚠️ Server is shutting down. See you next time!',
+                    'delay':   3,
+                })
+        except Exception:
+            pass
+        _time.sleep(3)   # give clients time to receive the notice
+        import os as _os
+        _os.kill(_os.getpid(), 15)   # SIGTERM — clean exit
+
+    threading.Thread(target=_do_shutdown, daemon=True).start()
+
+    return jsonify({'status': 'shutdown initiated', 'delay_seconds': 3})

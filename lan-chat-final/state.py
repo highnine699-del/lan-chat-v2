@@ -301,6 +301,7 @@ def create_room(
         'is_frozen':       False,
         'delete_timer':    None,
         'session_key':     None,   # AES-GCM JWK set by creator, relayed to joiners
+        'key_mode':        'relay',  # future: 'e2e' for end-to-end encrypted rooms
         'seq':             0,      # per-room message sequence counter
     }
     rooms[room_id] = room
@@ -310,6 +311,24 @@ def create_room(
 
 def get_room(room_id: str) -> dict | None:
     return rooms.get(room_id)
+
+
+def update_room(room_id: str, **kwargs) -> bool:
+    """
+    Central helper for mutating room state.
+    Prevents scattered direct dict mutations across modules.
+    Returns True if the room exists and was updated, False otherwise.
+
+    Usage:
+        update_room(room_id, session_key=jwk_dict)
+        update_room(room_id, is_frozen=True)
+    """
+    room = rooms.get(room_id)
+    if not room:
+        return False
+    for key, value in kwargs.items():
+        room[key] = value
+    return True
 
 
 def is_room_admin(sid: str, room_id: str) -> bool:
@@ -376,16 +395,19 @@ def cancel_room_delete(room_id: str) -> None:
 
 # ── Smart spam detection ──────────────────────────────────────────────────────
 
-def check_smart_spam(sid: str, text: str) -> str:
+def check_smart_spam(sid: str, text: str, msg_limit: int = SPAM_MSG_LIMIT) -> str:
     """
     Returns 'ok', 'cooldown', or 'shadow'.
 
     Detection rules (per your spec):
-    1. Rate limit: > SPAM_MSG_LIMIT messages in SPAM_WINDOW_S seconds → cooldown
+    1. Rate limit: > msg_limit messages in SPAM_WINDOW_S seconds → cooldown
     2. Repeat flood: same message SPAM_REPEAT_LIMIT times in a row → shadow mute
     3. Fast typing: < 0.3s between messages → increment spam_count
     4. Large paste: message > 500 chars → increment spam_count
     5. spam_count > 5 → shadow mute
+
+    msg_limit defaults to SPAM_MSG_LIMIT (LAN). Pass SPAM_MSG_LIMIT_PUBLIC
+    from the caller when PUBLIC_MODE is active for stricter enforcement.
     """
     now = time.time()
 
@@ -414,7 +436,7 @@ def check_smart_spam(sid: str, text: str) -> str:
     while ts and now - ts[0] > SPAM_WINDOW_S:
         ts.popleft()
 
-    if len(ts) >= SPAM_MSG_LIMIT:
+    if len(ts) >= msg_limit:
         tracker['cooldown_until'] = now + SPAM_COOLDOWN_S
         ts.clear()
         return 'cooldown'

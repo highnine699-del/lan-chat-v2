@@ -7,7 +7,9 @@
   <title>LAN Chat</title>
   <link rel="manifest" href="/static/manifest.json">
   <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
-  <link rel="apple-touch-icon" href="/static/icon.svg">
+  <!-- iOS requires a PNG apple-touch-icon — SVG is ignored and falls back to "L" -->
+  <link rel="apple-touch-icon" sizes="192x192" href="/static/icon-192.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="/static/icon-512.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;500;600&display=swap" rel="stylesheet">
   <!-- Emoji Picker (bundled locally - works offline) -->
@@ -413,6 +415,21 @@
     .icon-btn:hover svg {
       stroke: var(--accent);
       filter: drop-shadow(0 0 6px rgba(0, 255, 136, 0.6));
+    }
+
+    /* Lock overlay on call buttons when HTTPS is not available */
+    .icon-btn.https-locked {
+      position: relative;
+    }
+
+    .icon-btn.https-locked::after {
+      content: '🔒';
+      position: absolute;
+      bottom: -2px;
+      right: -2px;
+      font-size: 9px;
+      line-height: 1;
+      pointer-events: none;
     }
 
     .icon-btn.danger:hover {
@@ -1426,6 +1443,13 @@
       </div>
       <h1>LAN Chat</h1>
       <p>Connect with people on your WiFi — no internet needed</p>
+      <!-- HTTPS warning — shown only on plain HTTP (non-localhost) -->
+      <div id="https-warning"
+        style="display:none;background:rgba(255,170,0,0.12);border:1px solid #ffaa00;
+           border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:#ffcc55;text-align:left;line-height:1.5;">
+        ⚠️ <strong>Plain HTTP detected.</strong> Voice &amp; video calls require HTTPS.<br>
+        Use the <strong>ngrok HTTPS link</strong> shared by the host, or access via <code>localhost</code>.
+      </div>
       <input type="text" id="username-input" class="login-input" placeholder="Enter your name..." maxlength="20"
         autocomplete="off" />
       <input type="text" id="password-input" class="login-input" placeholder="Password (optional, for identity)"
@@ -1763,6 +1787,28 @@
   </div>
 
   <script>
+    // ─── HTTPS WARNING + CALL BUTTON ENFORCEMENT ─────────────────
+    // WebRTC (calls) requires HTTPS or localhost. Warn users on plain HTTP
+    // and disable the call buttons so they don't fail silently.
+    if (location.protocol !== 'https:' &&
+      location.hostname !== 'localhost' &&
+      location.hostname !== '127.0.0.1') {
+      const w = document.getElementById('https-warning');
+      if (w) w.style.display = 'block';
+
+      // Disable call buttons as soon as the DOM is ready
+      document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('[onclick*="startCall"]').forEach(btn => {
+          btn.disabled = true;
+          btn.title = '🔒 Calls require HTTPS — use the ngrok link';
+          btn.style.opacity = '0.35';
+          btn.style.cursor = 'not-allowed';
+          // Add a lock badge so users instantly understand why
+          btn.classList.add('https-locked');
+        });
+      });
+    }
+
     // ─── DEV MODE ─────────────────────────────────────────────
     // Active on localhost automatically, or manually via:
     //   localStorage.setItem("dev_mode", "true")  → reload
@@ -2872,42 +2918,55 @@
     function stopRingTone() {
       _ringStopFns.forEach(fn => { try { fn(); } catch (_) { } });
       _ringStopFns = [];
+      // Stop vibration on mobile
+      if (navigator.vibrate) navigator.vibrate(0);
     }
 
     function playRingTone() {
       stopRingTone(); // cancel any previous ring
+      // Mobile vibration — exactly mirrors the audio double-ring pattern:
+      // burst(400) gap(200) burst(400) pause(1600) × 5 repeats
+      if (navigator.vibrate) {
+        navigator.vibrate([400, 200, 400, 1600, 400, 200, 400, 1600, 400, 200, 400, 1600, 400, 200, 400, 1600, 400, 200, 400]);
+      }
       try {
         const ctx = getAudioCtx();
-        const ringDuration = 0.5;
-        const silenceDuration = 0.5;
-        const repeatCount = 6;
         const oscillators = [];
 
-        for (let i = 0; i < repeatCount; i++) {
-          const startTime = ctx.currentTime + i * (ringDuration + silenceDuration);
+        // Classic telephone double-ring: two 0.4s bursts, 0.2s gap, 1.6s silence. Repeats 5×.
+        const burst = 0.4, gap = 0.2, pause = 1.6;
+        const cycle = burst + gap + burst + pause; // 2.6s per cycle
+        const repeats = 5;
 
-          [800, 1200].forEach(freq => {
+        function makeBurst(startTime) {
+          // Three layered harmonics for warm telephone timbre
+          [
+            { f: 480, vol: 0.22, type: 'sine' },
+            { f: 960, vol: 0.10, type: 'sine' },
+            { f: 1440, vol: 0.05, type: 'triangle' },
+          ].forEach(({ f, vol, type }) => {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
-
             osc.connect(gain);
             gain.connect(ctx.destination);
-
-            osc.frequency.value = freq;
-            osc.type = 'sine';
-
+            osc.frequency.value = f;
+            osc.type = type;
             gain.gain.setValueAtTime(0, startTime);
-            gain.gain.linearRampToValueAtTime(0.2, startTime + 0.05);
-            gain.gain.setValueAtTime(0.2, startTime + ringDuration - 0.1);
-            gain.gain.linearRampToValueAtTime(0, startTime + ringDuration);
-
+            gain.gain.linearRampToValueAtTime(vol, startTime + 0.02);
+            gain.gain.setValueAtTime(vol, startTime + burst - 0.04);
+            gain.gain.linearRampToValueAtTime(0, startTime + burst);
             osc.start(startTime);
-            osc.stop(startTime + ringDuration);
+            osc.stop(startTime + burst);
             oscillators.push(osc);
           });
         }
 
-        // Register stop function so the ring can be cancelled early
+        for (let i = 0; i < repeats; i++) {
+          const base = ctx.currentTime + i * cycle;
+          makeBurst(base);               // first burst
+          makeBurst(base + burst + gap); // second burst (double-ring)
+        }
+
         _ringStopFns.push(() => {
           oscillators.forEach(o => { try { o.stop(); } catch (_) { } });
         });
@@ -4097,6 +4156,14 @@
         return;
       }
 
+      // Block calls on plain HTTP (WebRTC requires HTTPS or localhost)
+      if (location.protocol !== 'https:' &&
+        location.hostname !== 'localhost' &&
+        location.hostname !== '127.0.0.1') {
+        showToast('⚠️ Calls require HTTPS — use the ngrok link');
+        return;
+      }
+
       // Check browser support
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         alert('⚠️ Your browser does not support calls.\n\nTry:\n• Chrome, Firefox, Safari, or Edge\n• Access over HTTPS (or localhost)\n• Allow camera/microphone when prompted');
@@ -4682,10 +4749,39 @@
     } // end handleSignal
 
     // ─── WebRTC STATS MONITOR ─────────────────────────────────────────
+    let _lastAudioBytes = 0;
+    let _noAudioWarned = false;
+
+    function _showCallWarning(msg) {
+      const el = document.getElementById('call-status');
+      if (el && !el.dataset.warning) {
+        el.dataset.warning = '1';
+        const prev = el.textContent;
+        el.textContent = msg;
+        el.style.color = '#ffaa00';
+        setTimeout(() => {
+          el.textContent = prev;
+          el.style.color = '';
+          delete el.dataset.warning;
+        }, 5000);
+      }
+    }
+
     async function monitorWebRTCStats() {
       if (!state.peerConnection || state.callState !== 'connected') return;
 
       try {
+        // ── Local mic checks (instant feedback, no stats API needed) ─────────
+        if (!state.localStream || state.localStream.getAudioTracks().length === 0) {
+          _showCallWarning('🎤 Microphone not detected');
+          return;
+        }
+        const localTrack = state.localStream.getAudioTracks()[0];
+        if (localTrack && !localTrack.enabled) {
+          _showCallWarning('🔇 You are muted');
+          // Don't return — still check remote audio below
+        }
+
         const stats = await state.peerConnection.getStats();
         let audioStats = null, videoStats = null, candidatePair = null;
 
@@ -4700,20 +4796,35 @@
         });
 
         if (audioStats) {
-          console.log('[WebRTC-Stats] Audio - Received:', audioStats.bytesReceived, 'packets:', audioStats.packetsReceived);
-          if (audioStats.bytesReceived === 0) {
-            console.warn('[WebRTC-Stats] ⚠️ No audio data received! Check if remote is sending audio.');
+          const bytesNow = audioStats.bytesReceived || 0;
+          const packetsLost = audioStats.packetsLost || 0;
+          const packetsRecvd = audioStats.packetsReceived || 1;
+          const lossRate = packetsLost / (packetsLost + packetsRecvd);
+
+          // Stalled audio — bytes stopped increasing after connection
+          if (bytesNow === _lastAudioBytes && bytesNow > 0 && !_noAudioWarned) {
+            _noAudioWarned = true;
+            _showCallWarning('🔇 No audio received — check remote mic');
+          } else if (bytesNow > _lastAudioBytes) {
+            _noAudioWarned = false;
           }
+          _lastAudioBytes = bytesNow;
+
+          if (lossRate > 0.1) {
+            _showCallWarning(`⚠️ Poor connection — ${Math.round(lossRate * 100)}% packet loss`);
+          }
+
+          console.log('[WebRTC-Stats] Audio bytes:', bytesNow, 'loss:', Math.round(lossRate * 100) + '%');
         } else {
-          console.warn('[WebRTC-Stats] No audio stats yet (still connecting or no audio track)');
+          console.warn('[WebRTC-Stats] No audio stats yet');
         }
 
         if (videoStats) {
-          console.log('[WebRTC-Stats] Video - Received:', videoStats.bytesReceived, 'packets:', videoStats.packetsReceived);
+          console.log('[WebRTC-Stats] Video bytes:', videoStats.bytesReceived);
         }
 
         if (candidatePair) {
-          console.log('[WebRTC-Stats] ICE - Current bitrate:', candidatePair.availableOutgoingBitrate.toFixed(0), 'bps');
+          console.log('[WebRTC-Stats] Bitrate:', (candidatePair.availableOutgoingBitrate || 0).toFixed(0), 'bps');
         }
       } catch (err) {
         console.warn('[WebRTC-Stats] Error:', err.message);
@@ -4738,8 +4849,10 @@
 
     function endCall() {
       console.log('[Call] Ending call');
-      stopRingTone();   // cancel any active ring tone immediately
+      stopRingTone();   // also stops vibration
       stopStatsMonitoring();
+      _lastAudioBytes = 0;
+      _noAudioWarned = false;
 
       // Clear ICE candidate buffer
       state.iceCandidateBuffer = [];
@@ -4804,9 +4917,13 @@
       const callNotif = _activeNotifs.get(`call-${state.callTarget}`);
       if (callNotif) { try { callNotif.close(); } catch (_) { } }
 
-      // Reset button states
-      document.getElementById('mute-btn').textContent = '🎙️';
-      document.getElementById('cam-btn').textContent = '📷';
+      // Reset button SVG icons to default (unmuted / cam-on) state
+      const muteIcon = document.getElementById('mute-icon');
+      if (muteIcon) muteIcon.innerHTML = '<path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm0 2a2 2 0 0 0-2 2v7a2 2 0 0 0 4 0V5a2 2 0 0 0-2-2zm-7 8a1 1 0 0 1 1 1 6 6 0 0 0 12 0 1 1 0 0 1 2 0 8 8 0 0 1-7 7.93V21h2a1 1 0 0 1 0 2H9a1 1 0 0 1 0-2h2v-1.07A8 8 0 0 1 4 12a1 1 0 0 1 1-1z"/>';
+      const camIcon = document.getElementById('cam-icon');
+      if (camIcon) camIcon.innerHTML = '<path d="M15 8H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1.5l4 2.5V9l-4 2.5V10a2 2 0 0 0-2-2z"/>';
+      document.getElementById('mute-btn')?.classList.remove('active-mute');
+      document.getElementById('cam-btn')?.classList.remove('cam-off');
     }
 
     function toggleMute() {

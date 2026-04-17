@@ -41,11 +41,15 @@ MAX_PRIVATE_HISTORY  = 200   # messages kept per private conversation
 MAX_SIGNAL_BYTES     = 64 * 1024  # 64 KB — max size of a WebRTC signal payload
 
 # ── Spam / rate-limiting ──────────────────────────────────────────────────────
-SPAM_MSG_LIMIT    = 5    # max messages allowed in the window
+SPAM_MSG_LIMIT    = 5    # max messages allowed in the window (LAN)
 SPAM_WINDOW_S     = 5    # rolling window in seconds
 SPAM_COOLDOWN_S   = 20   # cooldown duration after limit is hit
 SPAM_REPEAT_LIMIT = 3    # same message repeated this many times → shadow mute
 SPAM_FLOOD_WINDOW = 10   # seconds to check for copy-paste floods
+
+# Stricter limits applied automatically when PUBLIC_MODE=true
+SPAM_MSG_LIMIT_PUBLIC = 2   # max messages per window in public mode
+SPAM_WINDOW_S_PUBLIC  = 5   # same window, tighter cap
 
 # ── Security (ngrok / public deployment) ─────────────────────────────────────
 # Origins allowed to connect via WebSocket.
@@ -101,10 +105,21 @@ ANALYTICS_KEY = os.environ.get('ANALYTICS_KEY', '')
 # Leave unset to disable admin mode entirely (no one can be admin).
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
 
+# ── Public mode ───────────────────────────────────────────────────────────────
+# Set PUBLIC_MODE=true when exposing via ngrok or the internet.
+# When enabled, SERVER_PASSWORD is enforced on every join attempt.
+PUBLIC_MODE = os.environ.get('PUBLIC_MODE', 'false').lower() == 'true'
+
 # ── Server access password ────────────────────────────────────────────────────
 # Set SERVER_PASSWORD env var to require a password on join.
 # Leave unset (or empty) to allow anyone with the link to join.
-SERVER_PASSWORD = os.environ.get('SERVER_PASSWORD', '')
+# When PUBLIC_MODE=true, an empty SERVER_PASSWORD blocks all connections.
+SERVER_PASSWORD = os.environ.get('SERVER_PASSWORD', '') or None
+
+# ── Debug mode ────────────────────────────────────────────────────────────────
+# Set DEBUG=true to enable verbose server-side logging.
+# Never enable in production — exposes internal state.
+DEBUG = os.environ.get('DEBUG', 'false').lower() == 'true'
 
 # ── Connection limits ─────────────────────────────────────────────────────────
 # Maximum simultaneous socket connections from a single IP address.

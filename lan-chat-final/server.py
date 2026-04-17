@@ -17,8 +17,29 @@ routes/
 import os
 import socket
 import logging
+import atexit
 from flask import Flask, jsonify
 from flask_socketio import SocketIO
+
+# ── PID file — lets stop.bat kill the server without needing a password ───────
+_PID_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.pid")
+
+def _write_pid():
+    try:
+        with open(_PID_FILE, "w") as f:
+            f.write(str(os.getpid()))
+    except OSError:
+        pass
+
+def _remove_pid():
+    try:
+        if os.path.exists(_PID_FILE):
+            os.remove(_PID_FILE)
+    except OSError:
+        pass
+
+_write_pid()
+atexit.register(_remove_pid)
 
 from config import (
     SECRET_KEY,
@@ -28,6 +49,8 @@ from config import (
     PING_INTERVAL,
     ALLOWED_ORIGINS,
     ADMIN_PASSWORD,
+    PUBLIC_MODE,
+    DEBUG as CONFIG_DEBUG,
 )
 from routes import register_routes
 
@@ -122,7 +145,8 @@ if __name__ == '__main__':
     print(f'\n  Local:   http://127.0.0.1:5000')
     print(f'  Network: http://{local_ip}:5000')
     print(f'\n  Share the Network URL with others on your WiFi.')
-    print(f'\n  Admin mode:  {"✅ ENABLED  (Ctrl+Shift+A on login screen)" if ADMIN_PASSWORD else "❌ DISABLED  (set ADMIN_PASSWORD env var to enable)"}')
+    print(f'\n  Mode:        {"🌐 PUBLIC MODE (ngrok/internet)" if PUBLIC_MODE else "🏠 LAN MODE (local network)"}')
+    print(f'  Admin mode:  {"✅ ENABLED  (Ctrl+Shift+A on login screen)" if ADMIN_PASSWORD else "❌ DISABLED  (set ADMIN_PASSWORD env var to enable)"}')
     print(f'\n  NOTE: Traffic over ngrok is HTTPS-encrypted.')
     print(f'        Messages are E2E encrypted in the browser.')
     print(f'        Use the ngrok HTTPS URL for full transport encryption.')
@@ -140,6 +164,14 @@ if __name__ == '__main__':
             '  ⚠  FLASK_DEBUG=1 — the Werkzeug debugger is EXPOSED on the network!'
             '\n     Never run in debug mode on a shared or public network.'
         )
+    if CONFIG_DEBUG:
+        warn_lines.append(
+            '  ⚠  DEBUG=true — verbose server logging is enabled.'
+        )
+    if PUBLIC_MODE and not _os.environ.get('SERVER_PASSWORD'):
+        warn_lines.append(
+            '  ⚠  PUBLIC_MODE=true but SERVER_PASSWORD is not set — all joins will be blocked!'
+        )
     if not ADMIN_PASSWORD:
         warn_lines.append(
             '  ℹ  ADMIN_PASSWORD is not set — admin mode is disabled.'
@@ -153,5 +185,9 @@ if __name__ == '__main__':
         print(f'{"─" * 50}')
 
     print(f'{bar}\n')
+
+    # Unique marker printed to stdout — used by stop.bat to identify this process
+    # when the PID file is unavailable (fallback kill by commandline match).
+    print('SERVER_TAG:LAN_CHAT_RUNNING', flush=True)
 
     socketio.run(app, host='0.0.0.0', port=5000, debug=DEBUG)
