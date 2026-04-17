@@ -27,7 +27,7 @@ from config import (
     PING_TIMEOUT,
     PING_INTERVAL,
     ALLOWED_ORIGINS,
-    MAX_CONNECTIONS_PER_IP,
+    ADMIN_PASSWORD,
 )
 from routes import register_routes
 
@@ -66,28 +66,8 @@ register_routes(app, socketio)
 from state import start_cleanup_worker
 start_cleanup_worker()
 
-# ── Connection rate limiting ──────────────────────────────────────────────────
-# Track active socket connections per IP to prevent flooding.
-import collections
-_conn_counts: dict = collections.defaultdict(int)
-
-@socketio.on('connect')
-def _on_connect_guard():
-    """Reject connections that exceed MAX_CONNECTIONS_PER_IP."""
-    from flask import request as _req
-    ip = _req.environ.get('HTTP_X_FORWARDED_FOR', _req.remote_addr or '').split(',')[0].strip()
-    _conn_counts[ip] += 1
-    if _conn_counts[ip] > MAX_CONNECTIONS_PER_IP:
-        _conn_counts[ip] -= 1
-        log.warning('Connection rejected: too many connections from %s (%d)', ip, _conn_counts[ip])
-        return False  # reject the connection
-
-@socketio.on('disconnect')
-def _on_disconnect_guard():
-    from flask import request as _req
-    ip = _req.environ.get('HTTP_X_FORWARDED_FOR', _req.remote_addr or '').split(',')[0].strip()
-    if _conn_counts[ip] > 0:
-        _conn_counts[ip] -= 1
+# IP-based connection rate limiting is handled inside handle_join (routes/sockets.py).
+# No additional connect/disconnect guards needed here.
 
 
 # ── ngrok browser-warning bypass ─────────────────────────────────────────────
@@ -132,6 +112,7 @@ def _get_local_ip() -> str:
 
 # ── Dev-server entry point ────────────────────────────────────────────────────
 if __name__ == '__main__':
+    from config import ADMIN_PASSWORD
     local_ip = _get_local_ip()
     bar = '=' * 50
 
@@ -141,9 +122,36 @@ if __name__ == '__main__':
     print(f'\n  Local:   http://127.0.0.1:5000')
     print(f'  Network: http://{local_ip}:5000')
     print(f'\n  Share the Network URL with others on your WiFi.')
-    print(f'\n  NOTE: LAN traffic is plain HTTP.')
-    print(f'        Private messages are E2E encrypted in the browser.')
+    print(f'\n  Admin mode:  {"✅ ENABLED  (Ctrl+Shift+A on login screen)" if ADMIN_PASSWORD else "❌ DISABLED  (set ADMIN_PASSWORD env var to enable)"}')
+    print(f'\n  NOTE: Traffic over ngrok is HTTPS-encrypted.')
+    print(f'        Messages are E2E encrypted in the browser.')
     print(f'        Use the ngrok HTTPS URL for full transport encryption.')
+
+    # ── Unmissable security warnings ─────────────────────────────────────────
+    import os as _os
+
+    warn_lines = []
+    if not _os.environ.get('SECRET_KEY'):
+        warn_lines.append(
+            '  ⚠  SECRET_KEY is not set — sessions will reset on each restart.'
+        )
+    if DEBUG:
+        warn_lines.append(
+            '  ⚠  FLASK_DEBUG=1 — the Werkzeug debugger is EXPOSED on the network!'
+            '\n     Never run in debug mode on a shared or public network.'
+        )
+    if not ADMIN_PASSWORD:
+        warn_lines.append(
+            '  ℹ  ADMIN_PASSWORD is not set — admin mode is disabled.'
+        )
+
+    if warn_lines:
+        print(f'\n{"─" * 50}')
+        print('  SECURITY NOTICES:')
+        for line in warn_lines:
+            print(line)
+        print(f'{"─" * 50}')
+
     print(f'{bar}\n')
 
     socketio.run(app, host='0.0.0.0', port=5000, debug=DEBUG)

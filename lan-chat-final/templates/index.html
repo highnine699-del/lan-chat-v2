@@ -1430,15 +1430,19 @@
         autocomplete="off" />
       <input type="text" id="password-input" class="login-input" placeholder="Password (optional, for identity)"
         autocomplete="off" />
-      <!-- Admin password — hidden by default, revealed by clicking the tiny link below -->
-      <input type="password" id="admin-password-input" class="login-input" placeholder="Admin password"
-        autocomplete="off" style="display:none;margin-bottom:4px;" />
-      <button class="login-btn" onclick="doLogin()">Start Chatting</button>
-      <!-- Invisible admin trigger — no label, no hint, just a tiny dot -->
-      <div style="text-align:right;margin-top:6px;">
-        <span id="admin-toggle" onclick="toggleAdminField()"
-          style="font-size:10px;color:var(--bg-tertiary);cursor:pointer;user-select:none;" title="">·</span>
+      <!-- Admin password — hidden by default -->
+      <div id="admin-field-wrap" style="display:none;">
+        <input type="password" id="admin-password-input" class="login-input" placeholder="🔑 Admin password"
+          autocomplete="off" style="border-color:rgba(255,200,0,0.5);margin-bottom:4px;" />
       </div>
+      <button class="login-btn" onclick="doLogin()">Start Chatting</button>
+    </div>
+    <!-- Admin trigger — visible but subtle, outside the main box -->
+    <div style="text-align:center;margin-top:16px;">
+      <span id="admin-toggle" onclick="toggleAdminField()" style="font-size:11px;color:var(--text-muted);cursor:pointer;opacity:0.4;
+               user-select:none;letter-spacing:1px;" title="Admin login">
+        · · ·
+      </span>
     </div>
   </div>
 
@@ -2056,18 +2060,34 @@
     });
 
     function toggleAdminField() {
-      const f = document.getElementById('admin-password-input');
+      const wrap = document.getElementById('admin-field-wrap');
       const t = document.getElementById('admin-toggle');
-      if (f.style.display === 'none') {
-        f.style.display = 'block';
+      const f = document.getElementById('admin-password-input');
+      if (wrap.style.display === 'none') {
+        wrap.style.display = 'block';
         f.focus();
-        t.style.color = 'var(--text-muted)';
+        t.style.opacity = '1';
+        t.style.color = 'gold';
+        t.textContent = '🔑 Admin';
       } else {
-        f.style.display = 'none';
+        wrap.style.display = 'none';
         f.value = '';
-        t.style.color = 'var(--bg-tertiary)';
+        t.style.opacity = '0.4';
+        t.style.color = 'var(--text-muted)';
+        t.textContent = '· · ·';
       }
     }
+
+    // Ctrl+Shift+A keyboard shortcut to reveal admin field
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'A') {
+        const loginScreen = document.getElementById('login-screen');
+        if (loginScreen && loginScreen.style.display !== 'none') {
+          e.preventDefault();
+          toggleAdminField();
+        }
+      }
+    });
 
     document.getElementById('admin-password-input').addEventListener('keydown', e => {
       if (e.key === 'Enter') doLogin();

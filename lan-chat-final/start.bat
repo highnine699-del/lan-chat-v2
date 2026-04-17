@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 echo.
 echo =========================================
 echo   LAN CHAT - Starting...
@@ -39,6 +40,29 @@ exit /b 1
 :found
 echo Python found: %PYTHON%
 echo.
+
+REM Prompt for admin password if not already set
+if "%ADMIN_PASSWORD%"=="" (
+    echo.
+    echo =========================================
+    echo   ADMIN PASSWORD SETUP
+    echo =========================================
+    echo.
+    echo Set an admin password to access admin features.
+    echo Press Enter to skip (no admin mode).
+    echo.
+    set /p ADMIN_PASSWORD="Admin password: "
+    if not "!ADMIN_PASSWORD!"=="" (
+        echo.
+        echo ✅ Admin mode will be ENABLED
+        echo    Reveal admin field: Ctrl+Shift+A on login screen
+    ) else (
+        echo.
+        echo ⚠️  Admin mode DISABLED (no password set)
+    )
+    echo.
+)
+
 echo Installing required packages...
 %PYTHON% -m pip install flask flask-socketio --quiet
 echo.
