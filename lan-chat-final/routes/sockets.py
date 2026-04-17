@@ -27,7 +27,7 @@ from config import (
     MAX_MESSAGE_LEN, MAX_SIGNAL_BYTES, UPLOAD_FOLDER,
     HIDE_VOTE_THRESHOLD, SPAM_COOLDOWN_S,
     MAX_ROOM_NAME_LEN, EPHEMERAL_TTLS, JOIN_TOKEN_TTL_S,
-    ADMIN_PASSWORD,
+    ADMIN_PASSWORD, MAX_CONNECTIONS_PER_IP,
 )
 from state import (
     # core state
@@ -37,6 +37,11 @@ from state import (
     message_votes, spam_tracker, analytics,
     join_tokens,
     uid_sessions, ip_connections, upload_counts,
+    # session registry
+    active_sessions,
+    register_session, update_session_room,
+    mark_session_disconnected, remove_session, get_session,
+    find_session_by_uid,
     # helpers
     get_user_list, next_color, unique_username,
     private_key, append_private, now_ms, clean_username,
@@ -195,6 +200,9 @@ def register_socket_handlers(socketio):
         upload_counts[sid] = 0
         init_user_state(sid, username, tag, color)
 
+        # Register in the authoritative session registry
+        register_session(sid, uid, display, client_ip)
+
         pub_key = data.get('publicKey')
         if isinstance(pub_key, dict):
             public_keys[display] = pub_key
@@ -224,6 +232,81 @@ def register_socket_handlers(socketio):
 
         emit('user_list', get_user_list(), broadcast=True)
         emit('system_message', system_msg(f'{display} joined'), broadcast=True)
+
+    # ── reconnect_sync ────────────────────────────────────────────────────────
+
+    @socketio.on('reconnect_sync')
+    def handle_reconnect_sync(data):
+        """
+        Formal state reconciliation on reconnect.
+
+        Client sends:
+          {
+            last_seq:   int | None   — last room message seq the client saw
+            room_id:    str | None   — room the client thinks it's in
+            known_ids:  list[str]    — msg_ids the client already has (global)
+          }
+
+        Server replies with sync_reply containing:
+          {
+            missed:      list[dict]  — messages the client is missing
+            current_seq: int         — current room seq (0 if not in a room)
+            room_id:     str | None  — confirmed room_id (None if not in room)
+          }
+
+        This enforces diff repair: the client can detect gaps and request
+        replay without relying on event ordering.
+        """
+        if not isinstance(data, dict):
+            return
+
+        user = current_user()
+        sid  = current_sid()
+        if not user or not sid:
+            return
+
+        last_seq   = data.get('last_seq')
+        room_id    = str(data.get('room_id', '')) or None
+        known_ids  = set(str(m)[:32] for m in data.get('known_ids', [])[:200])
+
+        missed      = []
+        current_seq = 0
+
+        # ── Room reconciliation ───────────────────────────────────────────────
+        if room_id and room_id in rooms:
+            room = rooms[room_id]
+            current_seq = room.get('seq', 0)
+
+            if last_seq is not None and isinstance(last_seq, int):
+                # Send all messages with seq > last_seq (diff repair)
+                missed = [
+                    m for m in filter_expired(room['messages'], room['ttl'])
+                    if m.get('seq', 0) > last_seq
+                ]
+            else:
+                # No seq info — send full room history
+                missed = filter_expired(room['messages'], room['ttl'])
+
+        # ── Global reconciliation (known_ids diff) ────────────────────────────
+        elif not room_id:
+            if known_ids:
+                # Send global messages the client doesn't have
+                missed = [
+                    m for m in list(message_history)[-100:]
+                    if m.get('msg_id') and m['msg_id'] not in known_ids
+                ]
+            else:
+                # Client has no known IDs — send full recent history
+                missed = [
+                    m for m in list(message_history)[-100:]
+                    if m.get('msg_id')
+                ]
+
+        emit('sync_reply', {
+            'missed':      missed,
+            'current_seq': current_seq,
+            'room_id':     room_id,
+        })
 
     # ── send_message (legacy + room-aware) ───────────────────────────────────
 
@@ -625,6 +708,8 @@ def register_socket_handlers(socketio):
         users[sid]['room_id'] = room_id
         if sid in user_state:
             user_state[sid]['room_id'] = room_id
+        # Keep registry in sync
+        update_session_room(sid, room_id)
 
         emit('room:created', {
             'room_id':    room_id,
@@ -1111,8 +1196,14 @@ def register_socket_handlers(socketio):
         if not sid:
             return
 
+        # Mark disconnected in registry FIRST — this is the authority signal.
+        # All cleanup derives from this, not from Flask request context.
+        mark_session_disconnected(sid)
+
         user = users.pop(sid, None)
         if not user:
+            # Session was never fully joined (e.g. connect then immediate drop)
+            remove_session(sid)
             return
 
         display = user['display']
@@ -1137,11 +1228,19 @@ def register_socket_handlers(socketio):
             except RuntimeError:
                 pass  # no request context (e.g. test environment)
 
-            # Capture room_id BEFORE popping user_state so _leave_current_room_by_sid
-            # can still find it (user_state is the source of truth for room_id here)
-            _leave_current_room_by_sid(sid, display)
+            # Capture room_id from the registry (independent of request context)
+            sess = get_session(sid)
+            room_id_from_registry = sess['room_id'] if sess else None
+
+            # Leave room using registry room_id as the authoritative source
+            if room_id_from_registry:
+                _leave_room_by_id(sid, room_id_from_registry, display)
+            else:
+                # Fallback: derive from user_state (covers edge cases)
+                _leave_current_room_by_sid(sid, display)
         finally:
             user_state.pop(sid, None)
+            remove_session(sid)
             emit('user_list', get_user_list(), broadcast=True)
             emit('system_message', system_msg(f'{display} left'), broadcast=True)
 
@@ -1160,6 +1259,8 @@ def register_socket_handlers(socketio):
         users[sid]['room_id'] = room_id
         if sid in user_state:
             user_state[sid]['room_id'] = room_id
+        # Keep registry in sync
+        update_session_room(sid, room_id)
 
         history = filter_expired(room['messages'], room['ttl'])
         emit('room:joined', {
@@ -1188,6 +1289,8 @@ def register_socket_handlers(socketio):
         user['room_id'] = None
         if sid in user_state:
             user_state[sid]['room_id'] = None
+        # Keep registry in sync
+        update_session_room(sid, None)
 
     def _leave_current_room_by_sid(sid: str, display: str) -> None:
         """Used during disconnect when user record is already popped."""

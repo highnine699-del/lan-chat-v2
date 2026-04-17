@@ -26,8 +26,9 @@ from config import (
     TURN_URL_UDP,
     UPLOAD_FOLDER,
     ANALYTICS_KEY,
+    MAX_UPLOADS_PER_SESSION,
 )
-from state import now_ms, sanitize_filename, analytics, shadow_muted, spam_tracker, users
+from state import now_ms, sanitize_filename, analytics, shadow_muted, spam_tracker, users, upload_counts, check_upload_rate
 
 http_bp = Blueprint('http', __name__)
 
@@ -204,6 +205,22 @@ def upload():
     file = request.files['file']
     if not file or not file.filename:
         return jsonify({'error': 'Empty filename'}), 400
+
+    # Per-IP upload rate limiting: burst + daily quota + per-session cap
+    client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr or '').split(',')[0].strip()
+
+    rate_result = check_upload_rate(client_ip)
+    if rate_result == 'burst':
+        return jsonify({'error': 'Upload rate limit exceeded. Please slow down.'}), 429
+    if rate_result == 'daily':
+        return jsonify({'error': 'Daily upload quota reached. Try again tomorrow.'}), 429
+
+    # Per-session cap (resets on page refresh / new socket session)
+    _ip_upload_key = f'ip:{client_ip}'
+    current_count = upload_counts.get(_ip_upload_key, 0)
+    if current_count >= MAX_UPLOADS_PER_SESSION:
+        return jsonify({'error': f'Upload limit reached ({MAX_UPLOADS_PER_SESSION} files per session)'}), 429
+    upload_counts[_ip_upload_key] = current_count + 1
 
     safe_name   = sanitize_filename(file.filename)
     stored_name = f'{now_ms()}_{safe_name}'

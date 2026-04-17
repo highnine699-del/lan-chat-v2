@@ -51,6 +51,11 @@ SPAM_FLOOD_WINDOW = 10   # seconds to check for copy-paste floods
 # Origins allowed to connect via WebSocket.
 # Set ALLOWED_ORIGINS env var as comma-separated list to override.
 # Default: allow localhost + any ngrok subdomain.
+#
+# PRODUCTION RECOMMENDATION: If exposing this server via ngrok or a public URL
+# long-term, set ALLOWED_ORIGINS to the specific URL(s) you trust:
+#   export ALLOWED_ORIGINS="https://your-ngrok-url.ngrok-free.app"
+# This prevents other sites from connecting to your server via CORS.
 _raw_origins = os.environ.get('ALLOWED_ORIGINS', '')
 ALLOWED_ORIGINS: list[str] | str = (
     [o.strip() for o in _raw_origins.split(',') if o.strip()]

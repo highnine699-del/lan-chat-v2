@@ -99,6 +99,15 @@ shadow_muted: dict = {}   # sid -> {'until': float}
 # ── Join tokens (approval flow for private rooms) ─────────────────────────────
 join_tokens: dict = {}    # token -> {'room_id': str, 'sid': str, 'expires': float}
 
+# ── Admin authority state (server-owned, single source of truth) ──────────────
+# Only ONE admin session can exist at a time.
+# The server is the ONLY entity that sets/clears this.
+admin_state: dict = {
+    'sid':           None,   # current admin socket ID
+    'lease_expires': 0.0,    # grace window after disconnect (epoch seconds)
+    'lease_timer':   None,   # threading.Timer for lease expiry
+}
+
 # ── Moderation / identity ─────────────────────────────────────────────────────
 uid_tags: dict      = {}   # uid -> 4-char tag (persistent across reconnects)
 uid_sessions: dict  = {}   # uid -> sid  (active session per uid for ghost cleanup)
@@ -108,8 +117,31 @@ spam_tracker: dict  = {}   # sid -> {'timestamps': deque, 'cooldown_until': floa
 # ── Upload tracking ───────────────────────────────────────────────────────────
 upload_counts: dict = {}   # sid -> int  (files uploaded this session)
 
+# ── Upload rate limiting (time-windowed, per-IP) ──────────────────────────────
+# Tracks upload timestamps per IP for burst + quota enforcement.
+# Schema: ip -> {'timestamps': deque[float], 'daily_count': int, 'day': int}
+#
+# NOTE: This covers file uploads via POST /upload, but does NOT apply to
+# text messages sent via Socket.IO. Text spam is handled by check_smart_spam()
+# in the send_message handler (rate limit + repeat detection + shadow mute).
+upload_rate: dict = {}
+
 # ── IP connection tracking ────────────────────────────────────────────────────
 ip_connections: dict = {}  # ip -> set[sid]
+
+# ── Active session registry (SID → session metadata) ─────────────────────────
+# This is the single source of truth for session state, independent of
+# Flask request context.  All cleanup derives from this registry.
+#
+# Schema:
+#   active_sessions[sid] = {
+#       'uid':      str,
+#       'display':  str,
+#       'room_id':  str | None,
+#       'status':   'connected' | 'disconnected',
+#       'ip':       str,
+#   }
+active_sessions: dict = {}  # sid -> session metadata
 
 # ── Analytics ─────────────────────────────────────────────────────────────────
 analytics: dict = {
@@ -421,6 +453,98 @@ def cooldown_remaining(sid: str) -> float:
     return max(0.0, tracker['cooldown_until'] - time.time())
 
 
+# ── Active session registry helpers ──────────────────────────────────────────
+
+def register_session(sid: str, uid: str, display: str, ip: str) -> None:
+    """Register a new session in the authoritative active_sessions registry."""
+    active_sessions[sid] = {
+        'uid':     uid,
+        'display': display,
+        'room_id': None,
+        'status':  'connected',
+        'ip':      ip,
+    }
+
+
+def update_session_room(sid: str, room_id: str | None) -> None:
+    """Update the room_id for a session in the registry."""
+    if sid in active_sessions:
+        active_sessions[sid]['room_id'] = room_id
+
+
+def mark_session_disconnected(sid: str) -> None:
+    """Mark a session as disconnected (soft removal — keeps record briefly)."""
+    if sid in active_sessions:
+        active_sessions[sid]['status'] = 'disconnected'
+
+
+def remove_session(sid: str) -> dict | None:
+    """Remove and return a session record from the registry."""
+    return active_sessions.pop(sid, None)
+
+
+def get_session(sid: str) -> dict | None:
+    """Return the session record for a sid, or None."""
+    return active_sessions.get(sid)
+
+
+def find_session_by_uid(uid: str) -> str | None:
+    """Return the active sid for a uid, or None."""
+    for sid, sess in active_sessions.items():
+        if sess['uid'] == uid and sess['status'] == 'connected':
+            return sid
+    return None
+
+
+# ── Upload rate limiting helpers ──────────────────────────────────────────────
+
+# Configuration (can be overridden via config.py additions)
+UPLOAD_BURST_LIMIT  = 5    # max uploads in UPLOAD_BURST_WINDOW seconds
+UPLOAD_BURST_WINDOW = 30   # seconds for burst detection
+UPLOAD_DAILY_LIMIT  = 200  # max uploads per IP per calendar day
+
+
+def check_upload_rate(ip: str) -> str:
+    """
+    Check whether an IP is allowed to upload.
+
+    Returns:
+      'ok'          — upload is allowed
+      'burst'       — too many uploads in the burst window
+      'daily'       — daily quota exhausted
+    """
+    now = time.time()
+    today = int(now // 86400)  # integer day number
+
+    entry = upload_rate.setdefault(ip, {
+        'timestamps':  deque(),
+        'daily_count': 0,
+        'day':         today,
+    })
+
+    # Reset daily counter on new day
+    if entry['day'] != today:
+        entry['daily_count'] = 0
+        entry['day'] = today
+
+    # Daily quota check
+    if entry['daily_count'] >= UPLOAD_DAILY_LIMIT:
+        return 'daily'
+
+    # Burst check: prune old timestamps
+    ts = entry['timestamps']
+    while ts and now - ts[0] > UPLOAD_BURST_WINDOW:
+        ts.popleft()
+
+    if len(ts) >= UPLOAD_BURST_LIMIT:
+        return 'burst'
+
+    # Allow — record this upload
+    ts.append(now)
+    entry['daily_count'] += 1
+    return 'ok'
+
+
 # ── Message helpers ───────────────────────────────────────────────────────────
 
 def private_key(a: str, b: str) -> str:
@@ -508,6 +632,25 @@ def start_cleanup_worker() -> None:
                     if age > ROOM_IDLE_GRACE_S:
                         rooms.pop(room_id, None)
 
+            # Prune stale disconnected sessions from active_sessions registry
+            stale_sids = [
+                sid for sid, sess in list(active_sessions.items())
+                if sess.get('status') == 'disconnected' and sid not in users
+            ]
+            for sid in stale_sids:
+                active_sessions.pop(sid, None)
+
+            # Prune upload_rate entries for IPs with no active users
+            active_ips = {
+                sess.get('ip') for sess in active_sessions.values()
+            }
+            stale_ips = [
+                ip for ip in list(upload_rate.keys())
+                if ip not in active_ips
+            ]
+            for ip in stale_ips:
+                upload_rate.pop(ip, None)
+
             # Auto-delete upload files older than 24 hours
             try:
                 from config import UPLOAD_FOLDER
@@ -525,3 +668,63 @@ def start_cleanup_worker() -> None:
 
     t = threading.Thread(target=_loop, daemon=True)
     t.start()
+
+# ── Admin authority helpers ───────────────────────────────────────────────────
+# These are the ONLY functions that may read or write admin_state.
+# No other module should touch admin_state directly.
+
+ADMIN_LEASE_S = 60   # seconds grace window after admin disconnects
+
+def admin_claim(sid: str) -> None:
+    """
+    Grant admin authority to *sid*.
+    Cancels any existing lease timer and overwrites the previous admin.
+    Only one admin can exist at a time.
+    """
+    # Cancel any pending lease expiry
+    existing_timer = admin_state.get('lease_timer')
+    if existing_timer:
+        existing_timer.cancel()
+    admin_state['sid']           = sid
+    admin_state['lease_expires'] = 0.0
+    admin_state['lease_timer']   = None
+
+
+def admin_release(sid: str) -> None:
+    """
+    Called when the admin socket disconnects.
+    Starts a grace-period lease — if the same sid reconnects within
+    ADMIN_LEASE_S seconds, admin authority is silently restored.
+    After the lease expires, admin_state is cleared.
+    """
+    if admin_state['sid'] != sid:
+        return   # not the admin, nothing to do
+
+    def _expire():
+        if admin_state['sid'] == sid:
+            admin_state['sid']           = None
+            admin_state['lease_expires'] = 0.0
+            admin_state['lease_timer']   = None
+
+    admin_state['lease_expires'] = time.time() + ADMIN_LEASE_S
+    timer = threading.Timer(ADMIN_LEASE_S, _expire)
+    timer.daemon = True
+    timer.start()
+    admin_state['lease_timer'] = timer
+
+
+def admin_reclaim(sid: str) -> bool:
+    """
+    Called on reconnect for a session that previously held admin.
+    Returns True if the lease is still valid and admin was restored.
+    """
+    if time.time() < admin_state.get('lease_expires', 0):
+        # Lease still valid — restore silently
+        admin_claim(sid)
+        return True
+    return False
+
+
+def is_admin(sid: str) -> bool:
+    """Return True if *sid* is the current admin."""
+    return admin_state['sid'] == sid
