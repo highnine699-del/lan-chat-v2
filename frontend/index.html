@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>LAN CHAT V2</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 80vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .stats {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-top: 5px;
+        }
+
+        .chat-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 12px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message-sender {
+            font-weight: 600;
+            font-size: 12px;
+            color: #667eea;
+            margin-bottom: 4px;
+        }
+
+        .message-text {
+            background: white;
+            padding: 10px 14px;
+            border-radius: 8px;
+            max-width: 80%;
+            word-wrap: break-word;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .message-time {
+            font-size: 11px;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        .input-area {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 10px;
+        }
+
+        #msg {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+
+        #msg:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .users-panel {
+            background: white;
+            border-left: 1px solid #e0e0e0;
+            width: 200px;
+            padding: 15px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        .users-panel.show {
+            display: block;
+        }
+
+        .user-item {
+            padding: 8px;
+            margin-bottom: 4px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .user-item.online::before {
+            content: "● ";
+            color: #4caf50;
+        }
+
+        .typing-indicator {
+            font-size: 12px;
+            color: #999;
+            font-style: italic;
+            margin-top: 8px;
+        }
+
+        .system-message {
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+            padding: 8px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>LAN Chat v2</h2>
+            <div class="stats">
+                <span id="online-count">0 online</span> |
+                <span id="room-name">General</span>
+            </div>
+        </div>
+        <div style="display: flex; flex: 1;">
+            <div class="chat-area" id="chat"></div>
+            <div class="users-panel" id="users-panel">
+                <h4 style="margin-bottom: 10px;">Online Users</h4>
+                <div id="users-list"></div>
+            </div>
+        </div>
+        <div class="input-area">
+            <input type="text" id="msg" placeholder="Type message..." autocomplete="off" />
+            <button onclick="sendMsg()">Send</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script>
+        const socket = io("http://127.0.0.1:8000", {
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            reconnectionAttempts: 5
+        });
+
+        const chatEl = document.getElementById("chat");
+        const msgInput = document.getElementById("msg");
+        const onlineCountEl = document.getElementById("online-count");
+        const roomNameEl = document.getElementById("room-name");
+        const usersList = document.getElementById("users-list");
+        let currentRoom = "general";
+        let typingTimeout;
+
+        // Socket events
+        socket.on("connect", () => {
+            console.log("Connected:", socket.id);
+            addSystemMessage("✓ Connected to chat");
+        });
+
+        socket.on("disconnect", () => {
+            console.log("Disconnected");
+            addSystemMessage("⚠ Disconnected from chat. Attempting to reconnect...");
+        });
+
+        socket.on("reconnect", () => {
+            console.log("Reconnected");
+            addSystemMessage("✓ Reconnected to chat");
+        });
+
+        socket.on("message", (data) => {
+            addMessage(data.sender, data.text, data.timestamp);
+        });
+
+        socket.on("message_history", (data) => {
+            // Clear chat when loading history (but keep system messages)
+            const systemMessages = chatEl.querySelectorAll(".system-message");
+            chatEl.innerHTML = "";
+            systemMessages.forEach(msg => chatEl.appendChild(msg));
+
+            // Add all historical messages
+            if (data.messages && data.messages.length > 0) {
+                data.messages.forEach(msg => {
+                    addMessage(msg.sender, msg.text, msg.timestamp);
+                });
+            } else {
+                addSystemMessage("No previous messages");
+            }
+        });
+
+        socket.on("user_joined", (data) => {
+            onlineCountEl.textContent = data.online_count + " online";
+            addSystemMessage(`${data.name} joined the chat`);
+        });
+
+        socket.on("user_left", (data) => {
+            onlineCountEl.textContent = data.online_count + " online";
+            addSystemMessage(`${data.name} left the chat`);
+        });
+
+        socket.on("user_list", (data) => {
+            updateUserList(data.users);
+        });
+
+        socket.on("room_list", (data) => {
+            console.log("Available rooms:", data.rooms);
+        });
+
+        socket.on("user_typing", (data) => {
+            if (data.is_typing) {
+                addSystemMessage(`${data.user_name} is typing...`);
+            }
+        });
+
+        socket.on("online_users", (data) => {
+            updateUserList(data.users);
+            onlineCountEl.textContent = data.count + " online";
+        });
+
+        // UI Functions
+        function sendMsg() {
+            const msg = msgInput.value.trim();
+            if (msg) {
+                socket.emit("message", msg);
+                msgInput.value = "";
+                msgInput.focus();
+            }
+        }
+
+        function addMessage(sender, text, timestamp) {
+            const msgDiv = document.createElement("div");
+            msgDiv.className = "message";
+            const time = new Date(timestamp).toLocaleTimeString();
+            msgDiv.innerHTML = `
+                <div class="message-sender">${escapeHtml(sender)}</div>
+                <div class="message-text">${escapeHtml(text)}</div>
+                <div class="message-time">${time}</div>
+            `;
+            chatEl.appendChild(msgDiv);
+            chatEl.scrollTop = chatEl.scrollHeight;
+        }
+
+        function addSystemMessage(text) {
+            const msgDiv = document.createElement("div");
+            msgDiv.className = "system-message";
+            msgDiv.innerHTML = escapeHtml(text);
+            chatEl.appendChild(msgDiv);
+            chatEl.scrollTop = chatEl.scrollHeight;
+        }
+
+        function updateUserList(users) {
+            usersList.innerHTML = users.map(user =>
+                `<div class="user-item online">${escapeHtml(user.name)}</div>`
+            ).join("");
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        // Keyboard shortcuts
+        msgInput.addEventListener("keypress", (e) => {
+            if (e.key === "Enter") {
+                sendMsg();
+            }
+        });
+
+        msgInput.addEventListener("input", () => {
+            clearTimeout(typingTimeout);
+            socket.emit("typing", true);
+            typingTimeout = setTimeout(() => {
+                socket.emit("typing", false);
+            }, 1000);
+        });
+
+        // Initial request for online users
+        setTimeout(() => {
+            socket.emit("get_online_users");
+        }, 500);
+    </script>
+</body>
+
+</html>
