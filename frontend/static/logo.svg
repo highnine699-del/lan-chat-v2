@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 260" width="200" height="260">
+  <defs>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glow-strong" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="text-glow" x="-20%" y="-60%" width="140%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="200" height="260" fill="#050508"/>
+
+  <!-- Hexagon outline -->
+  <polygon
+    points="100,18 168,57 168,135 100,174 32,135 32,57"
+    fill="none"
+    stroke="#00f5c4"
+    stroke-width="2.5"
+    filter="url(#glow)"
+    opacity="0.9"
+  />
+
+  <!-- Inner hexagon (subtle) -->
+  <polygon
+    points="100,38 150,66 150,122 100,150 50,122 50,66"
+    fill="none"
+    stroke="#00f5c4"
+    stroke-width="0.8"
+    opacity="0.2"
+  />
+
+  <!-- Connection lines -->
+  <g stroke="#00f5c4" stroke-width="1.2" opacity="0.5" filter="url(#glow)">
+    <line x1="100" y1="96" x2="100" y2="52"/>
+    <line x1="100" y1="96" x2="138" y2="74"/>
+    <line x1="100" y1="96" x2="138" y2="118"/>
+    <line x1="100" y1="96" x2="100" y2="140"/>
+    <line x1="100" y1="96" x2="62"  y2="118"/>
+    <line x1="100" y1="96" x2="62"  y2="74"/>
+    <line x1="100" y1="52"  x2="138" y2="74"/>
+    <line x1="138" y1="74"  x2="138" y2="118"/>
+    <line x1="138" y1="118" x2="100" y2="140"/>
+    <line x1="100" y1="140" x2="62"  y2="118"/>
+    <line x1="62"  y1="118" x2="62"  y2="74"/>
+    <line x1="62"  y1="74"  x2="100" y2="52"/>
+  </g>
+
+  <!-- Outer nodes -->
+  <g fill="#00f5c4" filter="url(#glow)">
+    <circle cx="100" cy="52"  r="3.5" opacity="0.85"/>
+    <circle cx="138" cy="74"  r="3.5" opacity="0.85"/>
+    <circle cx="138" cy="118" r="3.5" opacity="0.85"/>
+    <circle cx="100" cy="140" r="3.5" opacity="0.85"/>
+    <circle cx="62"  cy="118" r="3.5" opacity="0.85"/>
+    <circle cx="62"  cy="74"  r="3.5" opacity="0.85"/>
+  </g>
+
+  <!-- Center node -->
+  <circle cx="100" cy="96" r="5" fill="#00f5c4" filter="url(#glow-strong)" opacity="1"/>
+  <circle cx="100" cy="96" r="2.5" fill="#ffffff" opacity="0.9"/>
+
+  <!-- "nexus" text -->
+  <text
+    x="100"
+    y="210"
+    text-anchor="middle"
+    font-family="-apple-system, 'Segoe UI', system-ui, sans-serif"
+    font-size="28"
+    font-weight="300"
+    letter-spacing="8"
+    fill="#00f5c4"
+    filter="url(#text-glow)"
+    opacity="0.95"
+  >nexus</text>
+
+  <!-- Tagline -->
+  <text
+    x="100"
+    y="235"
+    text-anchor="middle"
+    font-family="-apple-system, 'Segoe UI', system-ui, sans-serif"
+    font-size="9"
+    font-weight="400"
+    letter-spacing="3"
+    fill="#00f5c4"
+    opacity="0.4"
+  >THE GRID IS OPEN</text>
+</svg>

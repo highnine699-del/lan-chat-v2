@@ -4,6 +4,6 @@ for /f "tokens=5" %%a in ('netstat -ano ^| find ":8000"') do (
     taskkill /F /PID %%a
 )
 
-REM Start the server
+REM Start the server using uvicorn directly
 cd /d "C:\Users\AY ADVANCE TECH\Documents\lan-chat-v2\backend"
-python main.py
+python -m uvicorn socket_manager:socket_app --host 0.0.0.0 --port 8000

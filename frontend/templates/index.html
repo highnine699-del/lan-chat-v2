@@ -1,0 +1,3677 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>NEXUS</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+  <!-- iOS requires a PNG apple-touch-icon — SVG is ignored and falls back to "L" -->
+  <link rel="apple-touch-icon" sizes="192x192" href="/static/icon-192.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="/static/icon-512.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <!-- Fonts loaded from Google removed — Segoe UI is a system font, no external request needed -->
+  <!-- Emoji Picker (bundled locally - works offline) -->
+  <script src="/static/emoji-picker.js?v={{ _v }}" type="module"></script>
+  <!-- Socket.IO (bundled locally — works offline/ngrok) -->
+  <script src="/static/socket.io.min.js?v={{ _v }}"></script>
+
+  <!-- ── LANCHAT V2 modules (refactored structure) ── -->
+  <!-- Entry point: init.js loads all modules in correct order -->
+  <script src="/static/init.js?v={{ _v }}" type="module"></script>
+
+  <style>
+    :root {
+      /* ── NEXUS — Futuristic Dark Theme ── */
+      --bg-primary: #050508;
+      --bg-secondary: #0d0d12;
+      --bg-tertiary: #13131a;
+      --bg-chat: #080809;
+      --bubble-me: #0a1f1a;
+      --bubble-other: #0f0f16;
+      --text-primary: #e8edf2;
+      --text-secondary: #6b7a8d;
+      --text-muted: #2e3a47;
+      /* ── Accent — cyan-green, the NEXUS signature ── */
+      --accent: #00f5c4;
+      --accent-rgb: 0, 245, 196;
+      --accent-hover: #00ffe0;
+      --accent-dark: #00a884;
+      --border: #1a1a24;
+      --danger: #ff3b5c;
+      --icon-btn: var(--text-secondary);
+      /* ── Motion system ── */
+      --t-micro: 120ms;
+      --t-state: 200ms;
+      --t-scene: 320ms;
+      /* ── Shadow system ── */
+      --shadow-elevation: 0 4px 16px rgba(0, 0, 0, 0.5);
+      --shadow-accent: 0 0 12px rgba(var(--accent-rgb), 0.2);
+      /* ── Neon glow ── */
+      --neon-glow: 0 0 10px rgba(var(--accent-rgb), 0.35);
+      --neon-glow-strong: 0 0 20px rgba(var(--accent-rgb), 0.6);
+      /* ── Scanline texture overlay ── */
+      --scanline: repeating-linear-gradient(0deg,
+          transparent,
+          transparent 2px,
+          rgba(0, 245, 196, 0.012) 2px,
+          rgba(0, 245, 196, 0.012) 4px);
+    }
+
+    /* ── System Mood Layer ─────────────────────────────────────────────────── */
+    /* Stable — cyan-green, NEXUS default */
+    body[data-mood="LAN"],
+    body[data-mood="idle"] {
+      --accent: #00f5c4;
+      --accent-rgb: 0, 245, 196;
+      --accent-hover: #00ffe0;
+      --accent-dark: #00a884;
+      --border: #1a1a24;
+    }
+
+    /* STUN — electric blue, still calm */
+    body[data-mood="STUN"] {
+      --accent: #00c8ff;
+      --accent-rgb: 0, 200, 255;
+      --accent-hover: #40d8ff;
+      --accent-dark: #0090cc;
+      --border: #0d1520;
+    }
+
+    /* TURN — amber, relay warning */
+    body[data-mood="TURN"] {
+      --accent: #f5a623;
+      --accent-rgb: 245, 166, 35;
+      --accent-hover: #fbbf24;
+      --accent-dark: #b45309;
+      --border: #1a1508;
+    }
+
+    /* Connecting — sky pulse */
+    body[data-mood="connecting"] {
+      --accent: #38d9f5;
+      --accent-rgb: 56, 217, 245;
+      --accent-hover: #7de8ff;
+      --accent-dark: #0284c7;
+      --border: #0a1520;
+    }
+
+    /* Unstable — orange tension */
+    body[data-mood="unstable"] {
+      --accent: #ff7c3a;
+      --accent-rgb: 255, 124, 58;
+      --accent-hover: #ff9a6a;
+      --accent-dark: #c2410c;
+      --border: #1a0e05;
+    }
+
+    /* Reconnecting — deeper orange */
+    body[data-mood="reconnecting"] {
+      --accent: #f97316;
+      --accent-rgb: 249, 115, 22;
+      --accent-hover: #fb923c;
+      --accent-dark: #c2410c;
+      --border: #1a0e05;
+    }
+
+    /* Failed — muted red */
+    body[data-mood="failed"],
+    body[data-mood="dead"] {
+      --accent: #ff3b5c;
+      --accent-rgb: 255, 59, 92;
+      --accent-hover: #ff6b85;
+      --accent-dark: #b91c1c;
+      --border: #1a0808;
+    }
+
+    /* ── Mood animations — scoped to call overlay only, never the whole page ── */
+    /* Connecting: slow breathe — calm anticipation */
+    body[data-mood="connecting"] #call-overlay {
+      animation: moodBreathe 3s ease-in-out infinite;
+    }
+
+    /* Reconnecting: soft tension — slightly faster, not alarming */
+    body[data-mood="reconnecting"] #call-overlay {
+      animation: moodBreathe 1.8s ease-in-out infinite;
+    }
+
+    /* Unstable: same breathe as reconnecting */
+    body[data-mood="unstable"] #call-overlay {
+      animation: moodBreathe 2.2s ease-in-out infinite;
+    }
+
+    /* Failed: no animation — quiet stop */
+    body[data-mood="failed"] #call-overlay,
+    body[data-mood="dead"] #call-overlay {
+      filter: grayscale(0.2) brightness(0.92);
+      transition: filter var(--t-scene) ease;
+    }
+
+    @keyframes moodBreathe {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.92;
+      }
+    }
+
+    /* ── Transition system — scoped, not global ─────────────────────────────── */
+    /* Accent color shifts: smooth but not slow */
+    .sidebar,
+    .chat-header,
+    .login-btn,
+    .send-btn,
+    .call-btn,
+    .icon-btn,
+    #connection-badge,
+    .online-dot,
+    .unread-badge,
+    .chat-item,
+    .input-box,
+    .bubble,
+    .reply-preview {
+      transition:
+        color var(--t-state) ease,
+        background-color var(--t-state) ease,
+        border-color var(--t-state) ease,
+        box-shadow var(--t-state) ease;
+    }
+
+    /* Interaction elements: fast micro-feedback + accent shift */
+    .call-btn,
+    .send-btn,
+    .icon-btn,
+    .chat-item,
+    .login-btn,
+    .msg-wrapper {
+      transition:
+        color var(--t-state) ease,
+        background-color var(--t-state) ease,
+        border-color var(--t-state) ease,
+        box-shadow var(--t-state) ease,
+        transform var(--t-micro) ease-out,
+        opacity var(--t-state) ease;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    /* ── Base layout (desktop-first) ────────────────────────────────────────── */
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      height: var(--app-height, 100vh);
+      overflow: hidden;
+      /* Subtle scanline texture — the NEXUS signature */
+      background-image: var(--scanline);
+    }
+
+    /* Mobile: use dynamic viewport height so keyboard doesn't push content off */
+    @media (max-width: 768px) {
+
+      html,
+      body {
+        height: var(--app-height, 100dvh);
+        overflow: hidden;
+        /* Safe-area insets for notched phones */
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
+    }
+
+    /* LOGIN / ONBOARDING SCREEN */
+    #login-screen {
+      position: fixed;
+      inset: 0;
+      background: #050508;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      overflow: hidden;
+    }
+
+    /* Matrix rain canvas sits behind everything */
+    #matrix-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0.18;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .login-box {
+      position: relative;
+      z-index: 2;
+      background: rgba(13, 13, 18, 0.88);
+      border: 1px solid rgba(var(--accent-rgb), 0.18);
+      border-radius: 20px;
+      padding: 44px 40px;
+      width: min(360px, 92vw);
+      text-align: center;
+      box-shadow:
+        0 0 0 1px rgba(var(--accent-rgb), 0.06),
+        0 24px 64px rgba(0, 0, 0, 0.7),
+        0 0 40px rgba(var(--accent-rgb), 0.08);
+      backdrop-filter: blur(20px);
+      box-sizing: border-box;
+    }
+
+    .login-logo {
+      width: 72px;
+      height: 72px;
+      background: transparent;
+      border-radius: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+      font-size: 36px;
+      border: 1.5px solid rgba(var(--accent-rgb), 0.3);
+      box-shadow:
+        0 0 20px rgba(var(--accent-rgb), 0.25),
+        0 0 60px rgba(var(--accent-rgb), 0.1);
+    }
+
+    .login-box h1 {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: var(--accent);
+      text-shadow: 0 0 20px rgba(var(--accent-rgb), 0.5);
+      margin-bottom: 6px;
+    }
+
+    .login-box p {
+      color: var(--text-secondary);
+      font-size: 13px;
+      margin-bottom: 32px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .login-input {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(var(--accent-rgb), 0.15);
+      border-radius: 10px;
+      padding: 13px 16px;
+      color: var(--text-primary);
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      margin-bottom: 12px;
+      box-sizing: border-box;
+      letter-spacing: 0.5px;
+    }
+
+    .login-input:focus {
+      border-color: rgba(var(--accent-rgb), 0.5);
+      box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.08);
+    }
+
+    /* Random alias generator button */
+    .alias-gen-btn {
+      background: none;
+      border: none;
+      color: var(--accent);
+      font-size: 12px;
+      cursor: pointer;
+      opacity: 0.7;
+      margin-bottom: 20px;
+      display: block;
+      width: 100%;
+      text-align: right;
+      padding: 0;
+      letter-spacing: 0.3px;
+      transition: opacity 0.15s;
+    }
+
+    .alias-gen-btn:hover {
+      opacity: 1;
+    }
+
+    .login-btn {
+      width: 100%;
+      background: var(--accent);
+      color: #050508;
+      border: none;
+      border-radius: 10px;
+      padding: 14px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      cursor: pointer;
+      transition: transform 0.14s ease-out, box-shadow 0.2s ease;
+      box-shadow: 0 0 20px rgba(var(--accent-rgb), 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
+      margin-top: 4px;
+    }
+
+    .login-btn:hover {
+      background: var(--accent-hover);
+      box-shadow: 0 0 32px rgba(var(--accent-rgb), 0.65), 0 4px 16px rgba(0, 0, 0, 0.4);
+      transform: scale(1.02);
+    }
+
+    .login-btn:active {
+      transform: scale(0.97);
+    }
+
+    /* APP LAYOUT — desktop default */
+    #app {
+      display: none;
+      height: var(--app-height, 100vh);
+      flex-direction: row;
+    }
+
+    /* Mobile override */
+    @media (max-width: 768px) {
+      #app {
+        height: var(--app-height, 100dvh);
+        flex-direction: column;
+      }
+    }
+
+    /* ── SIDEBAR ──────────────────────────────────────────────────────────── */
+    .sidebar {
+      width: 340px;
+      min-width: 280px;
+      background: var(--bg-secondary);
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--border);
+      flex-shrink: 0;
+      transition: width var(--t-scene) ease, min-width var(--t-scene) ease;
+    }
+
+    /* Collapsed sidebar — icon-only mode on desktop */
+    .sidebar.collapsed {
+      width: 0;
+      min-width: 0;
+      overflow: hidden;
+      border-right: none;
+    }
+
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: var(--bg-secondary);
+      height: 60px;
+      flex-shrink: 0;
+      border-bottom: 1px solid var(--border);
+      gap: 10px;
+    }
+
+    /* Geometric avatar — replaces letter circle */
+    .geo-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      cursor: pointer;
+      position: relative;
+      transition: transform var(--t-micro) ease, filter var(--t-micro) ease;
+    }
+
+    .geo-avatar:hover {
+      transform: scale(1.06);
+      filter: brightness(1.1);
+    }
+
+    /* Online ring around avatar */
+    .geo-avatar.online::after {
+      content: '';
+      position: absolute;
+      inset: -3px;
+      border-radius: 50%;
+      border: 2px solid var(--accent);
+      box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.5);
+      animation: onlineRingPulse 2.5s ease-in-out infinite;
+    }
+
+    .geo-avatar.offline::after {
+      content: '';
+      position: absolute;
+      inset: -3px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.1);
+    }
+
+    @keyframes onlineRingPulse {
+
+      0%,
+      100% {
+        box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.4);
+      }
+
+      50% {
+        box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.8);
+      }
+    }
+
+    /* my-avatar alias kept for JS compatibility */
+    .my-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      overflow: hidden;
+      transition: transform var(--t-micro) ease;
+    }
+
+    .my-avatar:hover {
+      transform: scale(1.06);
+      box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.4);
+    }
+
+    .sidebar-title {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--accent);
+      text-shadow: 0 0 12px rgba(var(--accent-rgb), 0.4);
+      flex: 1;
+    }
+
+    /* Sidebar collapse toggle button */
+    .sidebar-collapse-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 6px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color var(--t-micro) ease, background var(--t-micro) ease;
+      flex-shrink: 0;
+    }
+
+    .sidebar-collapse-btn:hover {
+      color: var(--accent);
+      background: rgba(var(--accent-rgb), 0.08);
+    }
+
+    /* Search bar */
+    .search-bar {
+      padding: 8px 12px;
+      background: var(--bg-secondary);
+      flex-shrink: 0;
+    }
+
+    .search-input {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 9px 14px 9px 38px;
+      color: var(--text-primary);
+      font-size: 13px;
+      outline: none;
+      transition: border-color var(--t-micro) ease, box-shadow var(--t-micro) ease;
+      box-sizing: border-box;
+    }
+
+    .search-input:focus {
+      border-color: rgba(var(--accent-rgb), 0.35);
+      box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.06);
+    }
+
+    .search-wrap {
+      position: relative;
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 11px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+    }
+
+    /* Chat list */
+    .chat-list {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .chat-list::-webkit-scrollbar {
+      width: 3px;
+    }
+
+    .chat-list::-webkit-scrollbar-thumb {
+      background: rgba(var(--accent-rgb), 0.15);
+      border-radius: 2px;
+    }
+
+    .chat-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.025);
+      transition:
+        background var(--t-micro) ease,
+        border-left-color var(--t-micro) ease;
+      border-left: 2px solid transparent;
+      position: relative;
+    }
+
+    .chat-item:hover {
+      background: rgba(var(--accent-rgb), 0.04);
+      border-left-color: rgba(var(--accent-rgb), 0.25);
+    }
+
+    .chat-item.active {
+      background: rgba(var(--accent-rgb), 0.07);
+      border-left-color: var(--accent);
+    }
+
+    /* Chat avatar in list — uses geo-avatar canvas */
+    .chat-avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 600;
+      flex-shrink: 0;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .chat-item-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .chat-item-name {
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 3px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Lock icon for private rooms */
+    .room-lock-icon {
+      color: var(--text-muted);
+      opacity: 0.6;
+      flex-shrink: 0;
+    }
+
+    .chat-item-preview {
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chat-item-preview.is-typing {
+      color: var(--accent);
+      font-style: italic;
+    }
+
+    /* Unread badge — number pill */
+    .unread-badge {
+      background: var(--accent);
+      color: #050508;
+      font-size: 11px;
+      font-weight: 700;
+      min-width: 20px;
+      height: 20px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 6px;
+      flex-shrink: 0;
+      box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.5);
+    }
+
+    /* Online dot — kept for compatibility, now hidden in favour of avatar ring */
+    .online-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--accent);
+      border-radius: 50%;
+      flex-shrink: 0;
+      box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.6);
+    }
+
+    /* Sidebar bottom actions */
+    .sidebar-actions {
+      display: flex;
+      gap: 6px;
+      padding: 8px 12px;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+      align-items: center;
+    }
+
+    .sidebar-action-btn {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      border-radius: 8px;
+      padding: 8px 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all var(--t-micro) ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+    }
+
+    .sidebar-action-btn:hover {
+      border-color: rgba(var(--accent-rgb), 0.4);
+      color: var(--accent);
+      background: rgba(var(--accent-rgb), 0.06);
+    }
+
+    .sidebar-action-btn.primary {
+      border-color: rgba(var(--accent-rgb), 0.3);
+      color: var(--accent);
+    }
+
+    .sidebar-action-btn.primary:hover {
+      background: rgba(var(--accent-rgb), 0.1);
+      box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.2);
+    }
+
+    /* Settings gear at very bottom */
+    .sidebar-settings-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 8px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color var(--t-micro) ease, background var(--t-micro) ease;
+      flex-shrink: 0;
+    }
+
+    .sidebar-settings-btn:hover {
+      color: var(--accent);
+      background: rgba(var(--accent-rgb), 0.08);
+    }
+
+    /* CHAT AREA */
+    .chat-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-chat);
+      min-width: 0;
+    }
+
+    .chat-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      background: var(--bg-secondary);
+      height: 60px;
+      flex-shrink: 0;
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 1px 12px rgba(0, 0, 0, 0.4);
+    }
+
+    .chat-header-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 600;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .chat-header-info {
+      flex: 1;
+    }
+
+    .chat-header-name {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .chat-header-status {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .icon-btn {
+      width: 40px;
+      height: 40px;
+      background: none;
+      border: none;
+      border-radius: 50%;
+      color: var(--text-secondary);
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0.65;
+      transition:
+        background-color var(--t-micro) ease-out,
+        transform var(--t-micro) ease-out,
+        opacity var(--t-micro) ease-out;
+    }
+
+    .icon-btn svg {
+      stroke: currentColor;
+    }
+
+    .icon-btn:hover {
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.06);
+      opacity: 1;
+      transform: scale(1.04);
+    }
+
+    .icon-btn:hover svg {
+      stroke: currentColor;
+    }
+
+    .icon-btn:active {
+      transform: scale(0.96);
+      opacity: 0.8;
+    }
+
+    /* Lock overlay on call buttons when HTTPS is not available */
+    .icon-btn.https-locked {
+      position: relative;
+    }
+
+    .icon-btn.https-locked::after {
+      content: '🔒';
+      position: absolute;
+      bottom: -2px;
+      right: -2px;
+      font-size: 9px;
+      line-height: 1;
+      pointer-events: none;
+    }
+
+    .icon-btn.danger:hover {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--danger);
+    }
+
+    /* MESSAGES */
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      background-image: url('/static/wallpaper.svg');
+      background-size: cover;
+      background-attachment: fixed;
+      will-change: transform;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Message focus mode — very subtle, not distracting */
+    #messages:hover .msg-wrapper {
+      opacity: 0.75;
+    }
+
+    #messages:hover .msg-wrapper:hover {
+      opacity: 1;
+    }
+
+    /* Consistent column margins */
+    .msg-wrapper.me {
+      padding-right: 4px;
+    }
+
+    .msg-wrapper.other {
+      padding-left: 4px;
+    }
+
+    #messages::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    #messages::-webkit-scrollbar-thumb {
+      background: var(--bg-tertiary);
+      border-radius: 3px;
+    }
+
+    .msg-wrapper {
+      display: flex;
+      margin: 6px 0 0;
+    }
+
+    /* Grouped messages (same sender, <3 min apart) collapse tightly */
+    /* Micro-variance: every 3rd grouped message gets 1px extra — breaks rigid grid */
+    .msg-wrapper.grouped {
+      margin-top: 2px;
+    }
+
+    .msg-wrapper.grouped:nth-child(3n) {
+      margin-top: 3px;
+    }
+
+    .msg-wrapper.me {
+      justify-content: flex-end;
+    }
+
+    .msg-wrapper.other {
+      justify-content: flex-start;
+    }
+
+    .bubble {
+      max-width: 65%;
+      padding: 8px 14px 6px;
+      border-radius: 14px;
+      position: relative;
+      word-break: break-word;
+      line-height: 1.45;
+      font-size: 14px;
+      transition: box-shadow 0.18s ease;
+    }
+
+    /* Hover glow — soft, not explosive */
+    .bubble:hover {
+      box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.15);
+    }
+
+    /* Sent bubble — NEXUS dark teal */
+    .msg-wrapper.me .bubble {
+      background: linear-gradient(135deg, #0a2820 0%, #061a12 100%);
+      border-radius: 14px 4px 14px 14px;
+      border-left: 1.5px solid rgba(var(--accent-rgb), 0.25);
+      box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Received bubble — deep dark */
+    .msg-wrapper.other .bubble {
+      background: #0f0f16;
+      border-radius: 4px 14px 14px 14px;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Grouped — remove tail corner */
+    .msg-wrapper.grouped.me .bubble {
+      border-radius: 14px;
+    }
+
+    .msg-wrapper.grouped.other .bubble {
+      border-radius: 14px;
+    }
+
+    .bubble-sender {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 3px;
+    }
+
+    .bubble-text {
+      white-space: pre-wrap;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    /* Timestamp — ghost info, revealed on hover */
+    .bubble-time {
+      font-size: 11px;
+      color: transparent;
+      text-align: right;
+      margin-top: 3px;
+      float: right;
+      margin-left: 8px;
+      transition: color 0.15s ease;
+      user-select: none;
+    }
+
+    .bubble:hover .bubble-time {
+      color: rgba(255, 255, 255, 0.38);
+    }
+
+    /* Own messages: always show time (dimly) since they have status ticks */
+    .msg-wrapper.me .bubble-time {
+      color: rgba(255, 255, 255, 0.22);
+    }
+
+    .msg-wrapper.me .bubble:hover .bubble-time {
+      color: rgba(255, 255, 255, 0.48);
+    }
+
+    .bubble img {
+      max-width: 280px;
+      max-height: 280px;
+      border-radius: 6px;
+      display: block;
+      cursor: pointer;
+    }
+
+    .bubble audio {
+      width: 220px;
+      height: 36px;
+      display: block;
+      margin-top: 4px;
+    }
+
+    .file-attach {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      padding: 8px 12px;
+      text-decoration: none;
+      color: var(--text-primary);
+      min-width: 180px;
+    }
+
+    .file-attach-icon {
+      font-size: 24px;
+    }
+
+    .file-attach-name {
+      font-size: 13px;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 160px;
+    }
+
+    .file-attach-size {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .system-msg {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 11px;
+      padding: 4px 12px;
+      margin: 8px auto;
+      width: fit-content;
+      opacity: 0.6;
+    }
+
+    /* ── Message motion — physical, weighted, micro-variance for realism ───── */
+    /* Received: full entrance with slight timing variance — human arrival feel  */
+    /* Sent: quick settle — you already know what you sent                       */
+
+    @keyframes msgArrive {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes msgSettle {
+      from {
+        opacity: 0.55;
+        transform: translateY(3px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Sent: 180ms settle — confident, immediate */
+    .msg-wrapper.me {
+      animation: msgSettle 180ms ease-out;
+    }
+
+    /* Received: 220ms base — JS randomises ±20ms via animation-duration for
+       human-feel asynchrony. Each message arrives slightly differently. */
+    .msg-wrapper.other {
+      animation: msgArrive 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    /* During an active call, no message animations — call is the scene */
+    body.call-active .msg-wrapper {
+      animation: none;
+    }
+
+    /* ── Jump-to-bottom / new messages button ─────────────────────────────── */
+    #jump-to-bottom {
+      display: none;
+      position: absolute;
+      bottom: 70px;
+      right: 16px;
+      background: var(--accent);
+      color: #0a0e13;
+      border: none;
+      border-radius: 20px;
+      height: 32px;
+      padding: 0 14px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: var(--neon-glow);
+      z-index: 20;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      transition: opacity 0.2s, transform 0.2s;
+      white-space: nowrap;
+    }
+
+    #jump-to-bottom.visible {
+      display: flex;
+    }
+
+    #jump-to-bottom:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--neon-glow-strong);
+    }
+
+    /* TYPING INDICATOR */
+    #typing-indicator {
+      padding: 4px 8%;
+      min-height: 20px;
+      font-size: 12px;
+      color: var(--accent);
+      font-style: italic;
+      flex-shrink: 0;
+    }
+
+    /* INPUT AREA — anchored, separated, never jumps */
+    .input-area {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      padding: 8px 12px;
+      padding-bottom: max(8px, env(safe-area-inset-bottom));
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+      position: sticky;
+      bottom: 0;
+      z-index: 10;
+    }
+
+    .input-box {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 20px;
+      padding: 10px 16px;
+      color: var(--text-primary);
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      resize: none;
+      max-height: 120px;
+      min-height: 40px;
+      line-height: 1.45;
+      transition: border-color var(--t-micro) ease;
+    }
+
+    .input-box:focus {
+      border-color: rgba(var(--accent-rgb), 0.3);
+      /* Controlled accent presence — one extra place, soft ambient glow only */
+      box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.08), inset 0 0 0 1px rgba(var(--accent-rgb), 0.12);
+    }
+
+    .input-box::placeholder {
+      color: var(--text-muted);
+    }
+
+    /* Send button — silent when idle, present when ready */
+    .send-btn {
+      width: 40px;
+      height: 40px;
+      background: var(--accent);
+      border: none;
+      border-radius: 50%;
+      color: #070b10;
+      font-size: 17px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition:
+        box-shadow var(--t-state) ease,
+        transform var(--t-micro) ease-out,
+        opacity var(--t-state) ease;
+      opacity: 0.35;
+      box-shadow: none;
+      font-weight: 700;
+    }
+
+    /* Active when typing — no glow, just presence */
+    .send-btn.typing {
+      opacity: 1;
+    }
+
+    /* Intent: slight lift */
+    .send-btn:hover {
+      opacity: 1;
+      box-shadow: var(--shadow-accent);
+      transform: scale(1.04);
+    }
+
+    /* Action: compress */
+    .send-btn:active {
+      transform: scale(0.96);
+    }
+
+    /* Send pulse — fires on click, removed by JS after animation */
+    @keyframes sendPulse {
+      0% {
+        transform: scale(1);
+        box-shadow: var(--neon-glow);
+      }
+
+      40% {
+        transform: scale(0.88);
+        box-shadow: var(--neon-glow-strong);
+      }
+
+      70% {
+        transform: scale(1.06);
+      }
+
+      100% {
+        transform: scale(1);
+      }
+    }
+
+    .send-btn.pulse {
+      animation: sendPulse 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    /* ── Presence pulse keyframes ───────────────────────────────────────────── */
+    @keyframes presencePulse {
+
+      0%,
+      100% {
+        box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.5);
+      }
+
+      50% {
+        box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0);
+      }
+    }
+
+    /* EMOJI PICKER */
+    #emoji-container {
+      position: absolute;
+      bottom: 70px;
+      left: 10px;
+      z-index: 100;
+      display: none;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    emoji-picker {
+      --background: var(--bg-secondary);
+      --border-color: var(--border);
+      --button-hover-background: var(--bg-tertiary);
+      --category-emoji-padding: 0.5rem;
+      --emoji-padding: 0.4rem;
+      --emoji-size: 1.3rem;
+      --input-border-color: var(--border);
+      --input-border-radius: 6px;
+      --input-font-color: var(--text-primary);
+      --input-placeholder-color: var(--text-muted);
+      --num-columns: 8;
+      --outline-color: var(--accent);
+      --indicator-color: var(--accent);
+      width: 340px;
+      height: 360px;
+    }
+
+    /* FILE INPUT HIDDEN */
+    #file-input {
+      display: none;
+    }
+
+    /* ── Call-active: focused isolation — chat recedes, call takes focus ─── */
+    /* Scene transition: var(--t-scene) so it feels intentional, not instant  */
+    /* Background blur ramps slightly faster than overlay fade — depth cue    */
+    .chat-area {
+      transition: filter 300ms ease, transform 300ms ease, opacity 300ms ease;
+    }
+
+    .sidebar {
+      transition: filter 300ms ease, opacity 300ms ease;
+    }
+
+    body.call-active .chat-area {
+      filter: blur(4px) brightness(0.35);
+      transform: scale(0.99);
+      pointer-events: none;
+    }
+
+    body.call-active .sidebar {
+      filter: blur(3px) brightness(0.35);
+      pointer-events: none;
+    }
+
+    /* ── CALL OVERLAY ──────────────────────────────────────────────────── */
+    /* Floating UI — highest contrast layer, blur-separated from chat        */
+    /* Scene transition: overlay fades in slightly slower than the bg blur   */
+    /* so it feels like a world shift, not a popup.                          */
+    #call-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #070b10;
+      z-index: 999;
+      flex-direction: column;
+      opacity: 0;
+      /* Overlay content fades in after the blur ramp — scene-transition feel */
+      transition: opacity 420ms ease;
+    }
+
+    #call-overlay.active {
+      display: flex;
+      opacity: 1;
+    }
+
+    /* Connection badge — minimal, reads at a glance, updates slowly */
+    #connection-badge {
+      position: absolute;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: rgba(7, 11, 16, 0.8);
+      backdrop-filter: blur(12px);
+      padding: 4px 12px;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      letter-spacing: 0.3px;
+      transition: color var(--t-scene) ease, border-color var(--t-scene) ease, opacity var(--t-state) ease;
+      white-space: nowrap;
+    }
+
+    #connection-badge[data-quality="good"] {
+      color: var(--accent);
+      border-color: rgba(var(--accent-rgb), 0.25);
+    }
+
+    #connection-badge[data-quality="unstable"] {
+      color: var(--accent);
+      border-color: rgba(var(--accent-rgb), 0.25);
+    }
+
+    #connection-badge[data-quality="dead"] {
+      color: var(--text-muted);
+      border-color: rgba(255, 255, 255, 0.06);
+    }
+
+    /* Video PiP wrapper — only shown for video calls */
+    #call-video-pip {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+    }
+
+    /* Remote video fills the whole overlay */
+    #remote-video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #111;
+      border-radius: 0;
+    }
+
+    /* Local (self) video — PiP, draggable to any corner */
+    #local-video {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 120px;
+      height: 90px;
+      object-fit: cover;
+      background: #0a0a0f;
+      border-radius: 12px;
+      border: 1.5px solid rgba(var(--accent-rgb), 0.35);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7), 0 0 12px rgba(var(--accent-rgb), 0.15);
+      z-index: 2;
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    #local-video:active {
+      cursor: grabbing;
+    }
+
+    #local-video.pip-dragging {
+      border-color: var(--accent);
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.8), 0 0 20px rgba(var(--accent-rgb), 0.4);
+    }
+
+    /* Gradient scrim at the bottom so text/buttons are readable */
+    #call-overlay::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 55%;
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.85) 0%, transparent 100%);
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* Info + controls sit above the scrim */
+    /* Spatial bias: avatar pulled slightly above true center, controls below */
+    /* This creates depth perception instead of a flat diagram layout.        */
+    #call-ui {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 3;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-bottom: max(32px, env(safe-area-inset-bottom));
+      gap: 6px;
+      /* Shift entire panel 6% above true bottom-center — visual weight bias */
+      padding-top: 6vh;
+    }
+
+    /* Avatar — still during stable call, breathes only when waiting */
+    /* Call avatar — geo canvas with glow ring */
+    .call-avatar {
+      width: 88px;
+      height: 88px;
+      border-radius: 50%;
+      margin-bottom: 16px;
+      margin-top: -3px;
+      box-shadow:
+        0 0 0 2px rgba(var(--accent-rgb), 0.3),
+        0 0 24px rgba(var(--accent-rgb), 0.2),
+        var(--shadow-elevation);
+      transition: box-shadow var(--t-state) ease;
+    }
+
+    /* Connecting: soft ring breathe */
+    body[data-mood="connecting"] .call-avatar {
+      animation: avatarBreathe 3s ease-in-out infinite;
+    }
+
+    body[data-mood="reconnecting"] .call-avatar {
+      animation: avatarBreathe 1.8s ease-in-out infinite;
+    }
+
+    /* Secondary call buttons row */
+    .call-buttons-secondary {
+      gap: 16px;
+      margin-bottom: 4px;
+    }
+
+    .call-btn-sm {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(var(--accent-rgb), 0.2);
+      background: rgba(13, 13, 18, 0.85);
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--t-micro) ease;
+      backdrop-filter: blur(8px);
+    }
+
+    .call-btn-sm:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      transform: scale(1.06);
+    }
+
+    .call-btn-sm:active {
+      transform: scale(0.95);
+    }
+
+    .call-btn-sm.active {
+      background: rgba(var(--accent-rgb), 0.15);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    @keyframes avatarBreathe {
+
+      0%,
+      100% {
+        box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.2), var(--shadow-elevation);
+      }
+
+      50% {
+        box-shadow: 0 0 0 10px rgba(var(--accent-rgb), 0), var(--shadow-elevation);
+      }
+    }
+
+    .call-name {
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
+    }
+
+    .call-status {
+      color: var(--text-secondary);
+      font-size: 14px;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+      margin-bottom: 8px;
+    }
+
+    /* ── Call quality indicator ─────────────────────────────────────────── */
+    #call-quality {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 16px;
+    }
+
+    #call-quality.visible {
+      display: flex;
+    }
+
+    .quality-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 18px;
+    }
+
+    .quality-bar {
+      width: 5px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.15);
+      transition: background-color 0.4s ease, transform 0.3s ease, height 0.3s ease;
+    }
+
+    .quality-bar:nth-child(1) {
+      height: 6px;
+    }
+
+    .quality-bar:nth-child(2) {
+      height: 10px;
+    }
+
+    .quality-bar:nth-child(3) {
+      height: 14px;
+    }
+
+    .quality-bar:nth-child(4) {
+      height: 18px;
+    }
+
+    .quality-bar.active {
+      background: var(--accent);
+    }
+
+    .quality-bar.active.warning {
+      background: #f97316;
+    }
+
+    .quality-bar.active.danger {
+      background: var(--danger);
+    }
+
+    @keyframes qualityFlicker {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.4;
+      }
+    }
+
+    .quality-bar.flicker {
+      animation: qualityFlicker 0.6s ease 2;
+    }
+
+    @keyframes qualityRecover {
+      0% {
+        box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0);
+      }
+
+      50% {
+        box-shadow: 0 0 6px 2px rgba(var(--accent-rgb), 0.6);
+      }
+
+      100% {
+        box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0);
+      }
+    }
+
+    .quality-bar.recover {
+      animation: qualityRecover 0.8s ease;
+    }
+
+    #call-quality-text {
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: 0.3px;
+      transition: color 0.4s ease;
+    }
+
+    #call-quality-text.warning {
+      color: #ffaa00;
+    }
+
+    #call-quality-text.danger {
+      color: #ff4455;
+    }
+
+    .call-buttons {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    /* Base pill button — weighted feel, not bouncy */
+    .call-btn {
+      height: 58px;
+      min-width: 58px;
+      border-radius: 29px;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition:
+        transform var(--t-micro) ease-out,
+        filter var(--t-micro) ease-out,
+        box-shadow var(--t-state) ease;
+      backdrop-filter: blur(8px);
+      padding: 0 20px;
+    }
+
+    .call-btn svg {
+      width: 24px;
+      height: 24px;
+      flex-shrink: 0;
+    }
+
+    /* Intent: slight lift */
+    .call-btn:hover {
+      transform: scale(1.03);
+      filter: brightness(1.06);
+    }
+
+    /* Action: compress */
+    .call-btn:active {
+      transform: scale(0.97);
+      filter: brightness(0.95);
+    }
+
+    /* End call — wide red pill (danger is intentionally fixed, not mood-driven) */
+    .call-btn.end {
+      background: var(--danger);
+      padding: 0 28px;
+      box-shadow: 0 4px 24px rgba(239, 68, 68, 0.55);
+    }
+
+    .call-btn.end svg {
+      fill: #fff;
+    }
+
+    .call-btn.end:hover {
+      background: #f87171;
+      box-shadow: 0 4px 32px rgba(239, 68, 68, 0.8);
+    }
+
+    /* Accept — accent pill */
+    .call-btn.accept {
+      background: var(--accent);
+      padding: 0 28px;
+      box-shadow: var(--neon-glow);
+    }
+
+    .call-btn.accept svg {
+      fill: #0a0e13;
+    }
+
+    .call-btn.accept:hover {
+      box-shadow: var(--neon-glow-strong);
+    }
+
+    /* Reject — danger pill */
+    .call-btn.reject {
+      background: var(--danger);
+      padding: 0 28px;
+      box-shadow: 0 4px 24px rgba(239, 68, 68, 0.55);
+    }
+
+    .call-btn.reject svg {
+      fill: #fff;
+    }
+
+    .call-btn.reject:hover {
+      background: #f87171;
+    }
+
+    /* Mute — dark pill, accent icon */
+    .call-btn.mute {
+      background: rgba(26, 35, 50, 0.85);
+      border: 1.5px solid rgba(var(--accent-rgb), 0.25);
+    }
+
+    .call-btn.mute svg {
+      fill: #e9edef;
+    }
+
+    .call-btn.mute:hover {
+      border-color: var(--accent);
+    }
+
+    /* Muted state — danger tint */
+    .call-btn.mute.active-mute {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: rgba(239, 68, 68, 0.5);
+    }
+
+    .call-btn.mute.active-mute svg {
+      fill: #f87171;
+    }
+
+    /* Camera — dark pill, accent icon */
+    .call-btn.vid {
+      background: rgba(26, 35, 50, 0.85);
+      border: 1.5px solid rgba(var(--accent-rgb), 0.25);
+    }
+
+    .call-btn.vid svg {
+      fill: #e9edef;
+    }
+
+    .call-btn.vid:hover {
+      border-color: var(--accent);
+    }
+
+    /* Camera off state — danger tint */
+    .call-btn.vid.cam-off {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: rgba(239, 68, 68, 0.5);
+    }
+
+    .call-btn.vid.cam-off svg {
+      fill: #f87171;
+    }
+
+    @media (max-width: 768px) {
+      #local-video {
+        width: 90px;
+        height: 68px;
+        top: 12px;
+        right: 12px;
+      }
+
+      .call-btn {
+        height: 54px;
+        min-width: 54px;
+        border-radius: 27px;
+      }
+
+      .call-btn svg {
+        width: 22px;
+        height: 22px;
+      }
+
+      .call-btn.end,
+      .call-btn.accept,
+      .call-btn.reject {
+        padding: 0 22px;
+      }
+    }
+
+    /* RECORD UI */
+    #record-bar {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 0 14px;
+      background: var(--bg-secondary);
+      height: 60px;
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 10;
+    }
+
+    #record-bar.active {
+      display: flex;
+    }
+
+    .record-dot {
+      width: 10px;
+      height: 10px;
+      background: #ef4444;
+      border-radius: 50%;
+      flex-shrink: 0;
+      animation: blink 1s infinite;
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: 0.3
+      }
+    }
+
+    #record-time {
+      color: var(--text-secondary);
+      font-size: 14px;
+      min-width: 38px;
+      flex-shrink: 0;
+    }
+
+    #voice-waveform {
+      flex: 1;
+      height: 36px;
+      min-width: 0;
+      border-radius: 6px;
+    }
+
+    .rec-cancel {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 22px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .rec-send {
+      background: var(--accent);
+      border: none;
+      border-radius: 50%;
+      width: 44px;
+      height: 44px;
+      color: white;
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    /* IMAGE LIGHTBOX */
+    #lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.9);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-out;
+    }
+
+    #lightbox.active {
+      display: flex;
+    }
+
+    #lightbox img {
+      max-width: 90vw;
+      max-height: 90vh;
+      border-radius: 8px;
+    }
+
+    /* PLACEHOLDER — empty state with subtle matrix rain */
+    .chat-placeholder {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+      background: var(--bg-chat);
+    }
+
+    #empty-state-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0.1;
+      pointer-events: none;
+    }
+
+    .chat-placeholder-inner {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .chat-placeholder-tagline {
+      font-size: 13px;
+      color: var(--text-muted);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      opacity: 0.6;
+    }
+
+    /* SCROLLBAR */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--bg-tertiary);
+      border-radius: 3px;
+    }
+
+    /* No chat selected */
+    .no-chat {
+      display: flex;
+    }
+
+    /* ── Reputation badges ─────────────────────────────────────────────── */
+    .rep-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 6px;
+      margin-left: 5px;
+      vertical-align: middle;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .rep-new {
+      background: rgba(255, 255, 255, 0.1);
+      color: #7fa999;
+    }
+
+    .rep-active {
+      background: rgba(var(--accent-rgb), 0.12);
+      color: var(--accent);
+    }
+
+    .rep-trusted {
+      background: rgba(var(--accent-rgb), 0.22);
+      color: var(--accent);
+    }
+
+    /* ── Vote-to-hide button ───────────────────────────────────────────── */
+    .vote-hide-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 11px;
+      opacity: 0;
+      transition: opacity 0.2s;
+      padding: 0 2px;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+
+    .bubble:hover .vote-hide-btn {
+      opacity: 0.6;
+    }
+
+    .vote-hide-btn:hover {
+      opacity: 1 !important;
+    }
+
+    .vote-count {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-left: 4px;
+    }
+
+    /* ── Reply-to preview (inside bubble) ─────────────────────────────── */
+    .reply-preview {
+      background: rgba(var(--accent-rgb), 0.05);
+      border-left: 2px solid rgba(var(--accent-rgb), 0.5);
+      border-radius: 4px;
+      padding: 4px 8px;
+      margin-bottom: 5px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      max-width: 100%;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      transition: background var(--t-micro) ease;
+    }
+
+    .reply-preview:hover {
+      background: rgba(var(--accent-rgb), 0.09);
+    }
+
+    .reply-preview .reply-author {
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 11px;
+    }
+
+    .reply-preview .reply-text {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      opacity: 0.8;
+    }
+
+    /* ── Reply bar (above input) ───────────────────────────────────────── */
+    #reply-bar {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 12px;
+      background: var(--bg-tertiary);
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    #reply-bar.active {
+      display: flex;
+    }
+
+    #reply-bar-inner {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    #reply-bar-sender {
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 11px;
+    }
+
+    #reply-bar-text {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      opacity: 0.8;
+    }
+
+    #reply-bar-cancel {
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 18px;
+      line-height: 1;
+      padding: 2px 4px;
+      border-radius: 4px;
+      transition: color 0.15s;
+    }
+
+    #reply-bar-cancel:hover {
+      color: var(--danger);
+    }
+
+    /* ── Swipe-to-reply indicator ──────────────────────────────────────── */
+    .msg-wrapper {
+      position: relative;
+    }
+
+    .swipe-reply-hint {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 16px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.1s;
+      color: var(--accent);
+    }
+
+    .msg-wrapper.me .swipe-reply-hint {
+      right: calc(100% + 6px);
+    }
+
+    .msg-wrapper.other .swipe-reply-hint {
+      left: calc(100% + 6px);
+    }
+
+    /* ── Scroll-to highlight flash ─────────────────────────────────────── */
+    @keyframes msgHighlight {
+      0% {
+        background: rgba(var(--accent-rgb), 0.14);
+      }
+
+      100% {
+        background: transparent;
+      }
+    }
+
+    .msg-highlight {
+      animation: msgHighlight 1.2s ease-out forwards;
+      border-radius: 8px;
+    }
+
+    /* ── Message action buttons (edit/delete/reply) ────────────────────── */
+    .msg-actions {
+      display: none;
+      gap: 4px;
+      margin-top: 2px;
+    }
+
+    .msg-wrapper:hover .msg-actions {
+      display: flex;
+    }
+
+    .msg-action-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 13px;
+      padding: 2px 5px;
+      border-radius: 4px;
+      color: var(--text-muted);
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .msg-action-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-primary);
+    }
+
+    /* ── Reactions ─────────────────────────────────────────────────────── */
+    .msg-reactions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 3px;
+      padding: 0 2px;
+    }
+
+    .msg-reaction {
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 1px 7px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1.6;
+      transition: transform 0.12s ease, background 0.12s ease;
+      user-select: none;
+    }
+
+    .msg-reaction:hover {
+      transform: scale(1.15);
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .msg-reaction.mine {
+      background: rgba(var(--accent-rgb), 0.1);
+      border-color: rgba(var(--accent-rgb), 0.3);
+    }
+
+    /* Reaction picker popup */
+    .reaction-picker {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 6px 10px;
+      display: flex;
+      gap: 6px;
+      z-index: 500;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      animation: msgFadeIn 0.15s ease-out;
+    }
+
+    .reaction-picker span {
+      font-size: 20px;
+      cursor: pointer;
+      transition: transform 0.1s ease;
+      line-height: 1;
+    }
+
+    .reaction-picker span:hover {
+      transform: scale(1.3);
+    }
+
+    /* ── Edited label ──────────────────────────────────────────────────── */
+    .edited-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-style: italic;
+      margin-left: 4px;
+    }
+
+    /* ── Sound mute toggle ─────────────────────────────────────────────── */
+    #sound-mute-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 18px;
+      padding: 4px 8px;
+      color: var(--text-secondary);
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+
+    #sound-mute-btn:hover {
+      background: rgba(255, 255, 255, 0.07);
+    }
+
+    /* ── Toast notification — quiet, not attention-seeking ─────────────── */
+    #toast {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      background: rgba(var(--accent-rgb), 0.1);
+      border: 1px solid rgba(var(--accent-rgb), 0.25);
+      color: var(--text-secondary);
+      padding: 7px 16px;
+      border-radius: 20px;
+      font-size: 13px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity var(--t-state) ease, transform var(--t-state) ease;
+      z-index: 2000;
+      white-space: nowrap;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* Allow clicks on buttons inside toast */
+    #toast button {
+      pointer-events: auto;
+    }
+
+    /* ── Connection state banner ───────────────────────────────────────────── */
+    #conn-banner {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 9999;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 12px;
+      /* Push content down so it doesn't overlap the banner */
+      transition: background 0.3s, color 0.3s;
+    }
+
+    /* When banner is visible, nudge the app down */
+    body.conn-banner-visible #app,
+    body.conn-banner-visible #login-screen {
+      padding-top: 30px;
+    }
+
+    /* ── Mobile touch improvements ─────────────────────────────────────────── */
+    /* Prevent text selection during long-press */
+    .chat-item,
+    .bubble-sender {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    /* ── Single mobile breakpoint (768px) — all mobile overrides live here ── */
+    @media (max-width: 768px) {
+
+      /* Larger tap targets */
+      .icon-btn {
+        width: 44px;
+        height: 44px;
+      }
+
+      .send-btn {
+        width: 48px;
+        height: 48px;
+      }
+
+      .call-btn {
+        width: 72px;
+        height: 72px;
+      }
+
+      /* Wider bubbles on mobile */
+      .bubble {
+        max-width: 78%;
+      }
+
+      /* Full-width chat area */
+      #app {
+        flex-direction: column;
+      }
+
+      .chat-area {
+        width: 100%;
+      }
+
+      /* Sidebar slides in as a fixed overlay — toggled via ☰ button */
+      .sidebar {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 85vw;
+        max-width: 320px;
+        z-index: 500;
+        box-shadow: 4px 0 20px rgba(0, 0, 0, 0.6);
+      }
+
+      .sidebar.mobile-open {
+        display: flex;
+      }
+
+      /* Dim overlay behind open sidebar */
+      .sidebar-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 499;
+      }
+
+      .sidebar-overlay.active {
+        display: block;
+      }
+
+      /* Show toggle buttons only on mobile */
+      #sidebar-open-btn {
+        display: block !important;
+      }
+
+      #sidebar-close-btn {
+        display: block !important;
+      }
+
+      /* Login box fits small screens */
+      .login-box {
+        width: 92vw;
+        padding: 28px 20px;
+      }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       GUI OPTIMIZATION — message grouping, status indicators, batch UX
+       ═══════════════════════════════════════════════════════════════════ */
+
+    /* ── Message grouping ──────────────────────────────────────────────── */
+    .msg-wrapper.grouped {
+      margin-top: 2px;
+    }
+
+    .msg-wrapper.grouped .bubble-sender {
+      display: none;
+    }
+
+    .date-separator {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 11px;
+      padding: 10px 0 4px;
+      user-select: none;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── Time divider (5-min gap between messages) ─────────────────────── */
+    .time-divider {
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-muted);
+      opacity: 0.5;
+      margin: 10px 0 4px;
+      user-select: none;
+    }
+
+    /* ── Message status indicators ─────────────────────────────────────── */
+    .msg-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      font-size: 10px;
+      margin-left: 4px;
+      vertical-align: middle;
+      opacity: 0.4;
+      transition: color 0.2s, opacity 0.2s;
+    }
+
+    .msg-status.sending {
+      opacity: 0.3;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    .msg-status.sent {
+      opacity: 0.45;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .msg-status.delivered {
+      opacity: 0.8;
+      color: var(--accent);
+    }
+
+    .msg-status.seen {
+      opacity: 1;
+      color: var(--accent);
+    }
+
+    .msg-status.failed {
+      opacity: 1;
+      color: #ff4d4d;
+    }
+
+    @keyframes statusSpin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .msg-status.sending::before {
+      content: '';
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      border: 1.5px solid rgba(255, 255, 255, 0.25);
+      border-top-color: rgba(255, 255, 255, 0.6);
+      border-radius: 50%;
+      animation: statusSpin 0.7s linear infinite;
+      margin-right: 1px;
+    }
+
+    /* ── Optimistic + failed states ────────────────────────────────────── */
+    .msg-wrapper.optimistic .bubble {
+      opacity: 0.82;
+    }
+
+    @keyframes failShake {
+
+      0%,
+      100% {
+        transform: translateX(0);
+      }
+
+      20% {
+        transform: translateX(-4px);
+      }
+
+      40% {
+        transform: translateX(4px);
+      }
+
+      60% {
+        transform: translateX(-3px);
+      }
+
+      80% {
+        transform: translateX(3px);
+      }
+    }
+
+    .msg-wrapper.failed .bubble {
+      border-left-color: var(--danger) !important;
+      opacity: 0.75;
+      animation: failShake 0.4s ease;
+    }
+
+    .msg-retry-btn {
+      background: none;
+      border: 1px solid var(--danger);
+      color: var(--danger);
+      border-radius: 4px;
+      font-size: 11px;
+      padding: 2px 7px;
+      cursor: pointer;
+      margin-top: 4px;
+      display: block;
+      transition: background 0.15s;
+    }
+
+    /* ── Upload-in-progress bubble ──────────────────────────────────────── */
+    .upload-bubble {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 200px;
+    }
+
+    .upload-bubble-icon {
+      font-size: 28px;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+
+    .upload-bubble-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .upload-bubble-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 180px;
+    }
+
+    .upload-bubble-size {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    .upload-bubble-status {
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: 600;
+      margin-top: 4px;
+    }
+
+    /* Circular spinner with cancel X inside */
+    .upload-spinner-wrap {
+      position: relative;
+      width: 40px;
+      height: 40px;
+      flex-shrink: 0;
+    }
+
+    .upload-spinner {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 3px solid rgba(255, 255, 255, 0.12);
+      border-top-color: var(--accent);
+      animation: uploadSpin 0.9s linear infinite;
+    }
+
+    @keyframes uploadSpin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .upload-spinner-x {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.55);
+      cursor: pointer;
+      border-radius: 50%;
+      transition: color 0.15s;
+    }
+
+    .upload-spinner-x:hover {
+      color: #ef4444;
+    }
+
+    .msg-retry-btn:hover {
+      background: rgba(255, 68, 85, 0.12);
+    }
+
+    /* ── Typing indicator — 3-bar waveform pulse ──────────────────────── */
+    .typing-wave {
+      display: inline-flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 14px;
+      margin-left: 5px;
+      vertical-align: middle;
+    }
+
+    .typing-wave span {
+      width: 3px;
+      border-radius: 2px;
+      background: var(--accent);
+      animation: typingWave 1s ease-in-out infinite;
+    }
+
+    .typing-wave span:nth-child(1) {
+      height: 5px;
+      animation-delay: 0s;
+    }
+
+    .typing-wave span:nth-child(2) {
+      height: 10px;
+      animation-delay: 0.15s;
+    }
+
+    .typing-wave span:nth-child(3) {
+      height: 5px;
+      animation-delay: 0.3s;
+    }
+
+    @keyframes typingWave {
+
+      0%,
+      100% {
+        transform: scaleY(0.5);
+        opacity: 0.5;
+      }
+
+      50% {
+        transform: scaleY(1.4);
+        opacity: 1;
+      }
+    }
+
+    /* ── Unread badge ──────────────────────────────────────────────────── */
+    .unread-badge {
+      background: var(--accent);
+      color: #050508;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 700;
+      min-width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 6px;
+      flex-shrink: 0;
+      box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.5);
+    }
+
+    /* ── Presence dot transitions ──────────────────────────────────────── */
+    .online-dot {
+      transition: background 0.4s ease, box-shadow 0.4s ease;
+    }
+
+    .online-dot.active {
+      background: var(--accent);
+      box-shadow: 0 0 4px rgba(var(--accent-rgb), 0.5);
+    }
+
+    .online-dot.idle {
+      background: #f0b429;
+      box-shadow: none;
+    }
+
+    .online-dot.in-call {
+      background: var(--danger);
+      box-shadow: 0 0 4px rgba(255, 68, 85, 0.4);
+    }
+
+    .online-dot.offline {
+      background: #3a4a5a;
+      box-shadow: none;
+    }
+
+    /* ── Active chat header glow ────────────────────────────────────────── */
+    .chat-header.active {
+      box-shadow: 0 1px 8px rgba(0, 0, 0, 0.25);
+    }
+
+    /* ── New message anchor button ──────────────────────────────────────── */
+    #new-msg-anchor {
+      display: none;
+      position: absolute;
+      bottom: 70px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--accent);
+      color: #0a0e13;
+      border: none;
+      border-radius: 16px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: var(--neon-glow);
+      z-index: 20;
+      white-space: nowrap;
+    }
+
+    #new-msg-anchor.visible {
+      display: block;
+    }
+
+    /* ── Reduced-motion accessibility ──────────────────────────────────────── */
+    @media (prefers-reduced-motion: reduce) {
+
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    /* ── In-chat search highlights ──────────────────────────────────────── */
+    .msg-search-match .bubble {
+      outline: 1px solid rgba(var(--accent-rgb), 0.3);
+    }
+
+    .msg-search-current .bubble {
+      outline: 2px solid var(--accent);
+      box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.3);
+    }
+
+    /* ── Low-end device class (set by JS on hardwareConcurrency <= 4) ───────── */
+    .low-end .msg-wrapper {
+      animation: none !important;
+      transition: none !important;
+    }
+
+    .low-end .bubble {
+      transition: none !important;
+    }
+
+    .low-end .send-btn {
+      transition: opacity 0.1s !important;
+    }
+
+    /* ── SETTINGS PANEL ──────────────────────────────────────────────────── */
+    #settings-panel.open {
+      display: flex !important;
+      transform: translateX(0);
+    }
+
+    .settings-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      cursor: pointer;
+      font-size: 14px;
+      color: var(--text-primary);
+    }
+
+    .settings-toggle-row:last-child {
+      border-bottom: none;
+    }
+
+    .settings-toggle {
+      width: 40px;
+      height: 22px;
+      border-radius: 11px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      position: relative;
+      transition: background var(--t-state) ease;
+      flex-shrink: 0;
+    }
+
+    .settings-toggle::after {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      top: 2px;
+      left: 2px;
+      transition: transform var(--t-state) ease, background var(--t-state) ease;
+    }
+
+    .settings-toggle[data-on="true"] {
+      background: rgba(var(--accent-rgb), 0.2);
+      border-color: rgba(var(--accent-rgb), 0.4);
+    }
+
+    .settings-toggle[data-on="true"]::after {
+      transform: translateX(18px);
+      background: var(--accent);
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- LOGIN -->
+  <div id="login-screen">
+    <!-- Matrix rain background -->
+    <canvas id="matrix-canvas"></canvas>
+
+    <div class="login-box">
+      <div class="login-logo">
+        <img src="/static/icon.svg" alt="NEXUS" style="width:52px;height:52px;display:block;">
+      </div>
+      <h1>NEXUS</h1>
+      <p>The grid is open.</p>
+      <!-- HTTPS warning — shown only on plain HTTP (non-localhost) -->
+      <div id="https-warning"
+        style="display:none;background:rgba(255,170,0,0.08);border:1px solid rgba(255,170,0,0.3);
+           border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px;color:#ffcc55;text-align:left;line-height:1.5;">
+        ⚠️ <strong>Plain HTTP detected.</strong> Voice &amp; video calls require HTTPS.<br>
+        Use the <strong>ngrok HTTPS link</strong> shared by the host, or access via <code>localhost</code>.
+      </div>
+      <input type="text" id="username-input" class="login-input" placeholder="Enter your alias..." maxlength="20"
+        autocomplete="off" />
+      <button class="alias-gen-btn" type="button">⚡ Generate random alias</button>
+      <input type="text" id="password-input" class="login-input" placeholder="Password (optional)" autocomplete="off" />
+      <!-- Admin password — hidden by default -->
+      <div id="admin-field-wrap" style="display:none;">
+        <input type="password" id="admin-password-input" class="login-input" placeholder="🔑 Admin password"
+          autocomplete="off" style="border-color:rgba(255,200,0,0.3);margin-bottom:4px;" />
+      </div>
+      <button class="login-btn" id="login-btn">Connect</button>
+    </div>
+    <!-- Admin trigger -->
+    <div style="text-align:center;margin-top:16px;position:relative;z-index:1;">
+      <span id="admin-toggle" style="font-size:11px;color:var(--text-muted);cursor:pointer;opacity:0.4;
+               user-select:none;letter-spacing:1px;" title="Admin login">
+        · · ·
+      </span>
+    </div>
+  </div>
+
+  <!-- CONNECTION STATE BANNER -->
+  <div id="conn-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;
+       text-align:center;font-size:13px;font-weight:600;padding:6px 12px;
+       transition:background 0.3s,color 0.3s;">
+  </div>
+
+  <!-- SIDEBAR OVERLAY (mobile) -->
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <!-- MAIN APP -->
+  <div id="app">
+    <!-- SIDEBAR -->
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <canvas id="my-avatar" class="my-avatar geo-avatar online" width="40" height="40" title="Your profile"></canvas>
+        <span class="sidebar-title" id="my-name">NEXUS</span>
+        <!-- Desktop collapse toggle -->
+        <button class="sidebar-collapse-btn" id="sidebar-collapse-btn"
+          title="Collapse sidebar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M9 3v18" />
+          </svg>
+        </button>
+        <!-- Close button — only visible on mobile when sidebar is open -->
+        <button id="sidebar-close-btn" style="display:none;background:none;border:none;color:var(--accent);
+                 font-size:22px;cursor:pointer;padding:4px 8px;" title="Close">✕</button>
+      </div>
+
+      <div class="search-bar">
+        <div class="search-wrap">
+          <span class="search-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </span>
+          <input type="text" class="search-input" placeholder="Search chats &amp; groups…" id="search-box" />
+        </div>
+      </div>
+
+      <div class="chat-list" id="chat-list">
+        <!-- Global chat always first -->
+        <div class="chat-item active" id="chat-item-global">
+          <div class="chat-avatar" id="global-chat-avatar" style="background:#0a1f1a;">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="2" y1="12" x2="22" y2="12" />
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+            </svg>
+          </div>
+          <div class="chat-item-info">
+            <div class="chat-item-name">Global</div>
+            <div class="chat-item-preview" id="preview-global">The grid is open</div>
+          </div>
+        </div>
+        <!-- Users/rooms appear here -->
+      </div>
+
+      <!-- Bottom actions -->
+      <div class="sidebar-actions">
+        <button class="sidebar-action-btn primary" id="new-group-btn" title="Create a new group">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          New Group
+        </button>
+        <button class="sidebar-action-btn" id="join-room-btn" title="Join a private group by ID">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          Join by ID
+        </button>
+        <button class="sidebar-settings-btn" id="settings-btn" title="Settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- CHAT AREA -->
+    <div class="chat-area" id="chat-area">
+      <!-- Placeholder when no DM selected -->
+      <div class="chat-placeholder" id="chat-placeholder">
+        <canvas id="empty-state-canvas"></canvas>
+        <div class="chat-placeholder-inner">
+          <img src="/static/logo.svg" alt="NEXUS" style="width:160px;height:auto;opacity:0.85;">
+          <p class="chat-placeholder-tagline">Select a conversation to begin</p>
+        </div>
+      </div>
+
+      <!-- Active chat view (hidden by default, shown when chat selected) -->
+      <div id="active-chat" style="display:none; flex-direction:column; flex:1; min-height:0;">
+        <div class="chat-header active">
+          <!-- ☰ sidebar toggle — only visible on mobile -->
+          <button id="sidebar-open-btn" style="display:none;background:none;border:none;color:var(--accent);
+                   font-size:22px;cursor:pointer;padding:4px 8px;flex-shrink:0;" title="Chats">☰</button>
+          <canvas class="chat-header-avatar" id="header-avatar" width="40" height="40"></canvas>
+          <div class="chat-header-info">
+            <div class="chat-header-name" id="header-name">Global Chat</div>
+            <div class="chat-header-status" id="header-status">Everyone online</div>
+          </div>
+          <div class="header-actions">
+            <button class="icon-btn" id="chat-search-btn" title="Search in chat">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                stroke-linejoin="round" width="18" height="18">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+            </button>
+            <button id="sound-mute-btn" class="icon-btn" title="Toggle notification sounds">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                stroke-linejoin="round" width="18" height="18">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
+              </svg>
+            </button>
+            <button class="icon-btn neon-icon" id="voice-call-btn" title="Voice call">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path
+                  d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+              </svg>
+            </button>
+            <button class="icon-btn neon-icon" id="video-call-btn" title="Video call">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="23 7 16 12 23 17 23 7" />
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- In-chat search bar — slides in below header -->
+        <div id="chat-search-bar" style="display:none;align-items:center;gap:8px;padding:6px 14px;
+             background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round" width="14" height="14" style="flex-shrink:0;">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input id="chat-search-input" type="text" placeholder="Search messages…"
+            style="flex:1;background:none;border:none;outline:none;color:var(--text-primary);font-size:13px;" />
+          <span id="chat-search-count"
+            style="font-size:11px;color:var(--text-muted);min-width:40px;text-align:right;"></span>
+          <button id="chat-search-prev-btn"
+            style="background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 4px;font-size:16px;"
+            title="Previous">↑</button>
+          <button id="chat-search-next-btn"
+            style="background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 4px;font-size:16px;"
+            title="Next">↓</button>
+          <button id="chat-search-close-btn"
+            style="background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 6px;font-size:16px;"
+            title="Close">✕</button>
+        </div>
+
+        <!-- Private room ID banner — shown only for private rooms, stays visible -->
+        <div id="room-id-banner" style="display:none;align-items:center;justify-content:center;
+             gap:10px;padding:6px 16px;background:rgba(0,255,136,0.07);
+             border-bottom:1px solid rgba(0,255,136,0.2);flex-shrink:0;flex-wrap:wrap;">
+          <span style="font-size:12px;color:var(--text-secondary);">🔑 Room ID:</span>
+          <code id="room-id-display" style="font-family:monospace;font-size:13px;font-weight:700;
+               color:var(--accent);letter-spacing:2px;"></code>
+          <button id="copy-room-id-btn" style="background:rgba(0,255,136,0.15);border:1px solid rgba(0,255,136,0.4);
+                   color:var(--accent);border-radius:6px;padding:3px 10px;font-size:12px;
+                   cursor:pointer;font-weight:600;transition:all 0.2s;">
+            📋 Copy
+          </button>
+          <span style="font-size:11px;color:var(--text-muted);">
+            Key: <code id="room-key-fingerprint"
+              style="font-family:monospace;color:var(--text-secondary);font-size:11px;">—</code>
+          </span>
+          <button id="rotate-key-btn" title="Rotate encryption key (admin only)" style="background:none;border:1px solid rgba(0,255,136,0.3);color:var(--text-muted);
+                   border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">
+            🔄 Rotate key
+          </button>
+        </div>
+
+        <div id="messages" style="position:relative;"></div>
+        <button id="jump-to-bottom" title="Jump to latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
+            stroke-linejoin="round" width="14" height="14">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+        <button id="new-msg-anchor" title="New messages">↓ New messages</button>
+        <div id="typing-indicator"></div>
+
+        <!-- Reply bar — shown when replying to a message -->
+        <div id="reply-bar">
+          <span style="color:var(--accent);font-size:16px;flex-shrink:0;">↩</span>
+          <div id="reply-bar-inner">
+            <span id="reply-bar-sender"></span>
+            <span id="reply-bar-text"></span>
+          </div>
+          <span id="reply-bar-cancel" title="Cancel reply">✕</span>
+        </div>
+
+        <!-- Upload progress bar -->
+        <div id="upload-progress-bar" style="display:none;padding:4px 12px 0;">
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary);">
+            <span id="upload-progress-label">Uploading…</span>
+            <span id="upload-progress-pct"
+              style="color:var(--accent);font-weight:600;min-width:36px;text-align:right;"></span>
+          </div>
+          <div style="height:3px;background:var(--bg-tertiary);border-radius:2px;margin-top:3px;overflow:hidden;">
+            <div id="upload-progress-fill"
+              style="height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width 0.1s linear;">
+            </div>
+          </div>
+        </div>
+
+        <div class="input-area" id="input-area">
+          <button class="icon-btn" title="Emoji" id="emoji-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round" width="20" height="20">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+              <line x1="9" y1="9" x2="9.01" y2="9" />
+              <line x1="15" y1="9" x2="15.01" y2="9" />
+            </svg>
+          </button>
+          <button class="icon-btn" id="attach-btn"
+            title="Attach file">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
+          <input type="file" id="file-input" accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.txt" />
+          <textarea class="input-box" id="msg-input" placeholder="Type a message" rows="1"></textarea>
+          <button class="icon-btn" id="mic-btn" title="Voice message">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+              <rect x="9" y="2" width="6" height="12" rx="3" />
+              <path d="M5 10a7 7 0 0 0 14 0" />
+              <line x1="12" y1="19" x2="12" y2="22" />
+              <line x1="9" y1="22" x2="15" y2="22" />
+            </svg>
+          </button>
+          <button class="send-btn" id="send-btn" title="Send">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
+              stroke-linejoin="round" width="18" height="18">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
+        </div>
+
+        <!-- Emoji Picker -->
+        <div id="emoji-container">
+          <emoji-picker></emoji-picker>
+        </div>
+
+        <!-- Record bar -->
+        <div id="record-bar">
+          <div class="record-dot"></div>
+          <span id="record-time">0:00</span>
+          <canvas id="voice-waveform" width="240" height="36"></canvas>
+          <button class="rec-cancel" id="rec-cancel-btn" title="Cancel">✕</button>
+          <button class="rec-send" id="rec-send-btn" title="Send">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
+              stroke-linejoin="round" width="16" height="16">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CALL OVERLAY -->
+  <div id="call-overlay">
+    <!-- Matrix rain background for calls -->
+    <canvas id="call-matrix-canvas"
+      style="position:absolute;inset:0;opacity:0.07;pointer-events:none;z-index:0;"></canvas>
+
+    <!-- Top status bar -->
+    <div id="connection-badge" data-quality="good" data-type="unknown">Connecting…</div>
+
+    <!-- Video elements — hidden for voice calls -->
+    <div id="call-video-pip" style="display:none;">
+      <video id="remote-video" autoplay playsinline></video>
+      <video id="local-video" autoplay muted playsinline></video>
+    </div>
+    <audio id="remote-audio" autoplay></audio>
+
+    <!-- Bottom UI panel -->
+    <div id="call-ui">
+      <!-- Geo avatar — pulses while connecting, reacts to speech -->
+      <canvas class="call-avatar" id="call-avatar" width="88" height="88"></canvas>
+      <div class="call-name" id="call-name"></div>
+      <div class="call-status" id="call-status">Calling…</div>
+
+      <!-- Connection quality bars -->
+      <div id="call-quality">
+        <div class="quality-bars">
+          <div class="quality-bar" id="qbar-1"></div>
+          <div class="quality-bar" id="qbar-2"></div>
+          <div class="quality-bar" id="qbar-3"></div>
+          <div class="quality-bar" id="qbar-4"></div>
+        </div>
+        <span id="call-quality-text">Connecting…</span>
+      </div>
+
+      <!-- Incoming call buttons -->
+      <div class="call-buttons" id="call-action-buttons" style="display:none;">
+        <button class="call-btn reject" id="reject-btn" title="Decline">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round" width="22" height="22">
+            <path
+              d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c1.12.45 2.3.7 3.53.7a2 2 0 0 1 2 2v3.5a2 2 0 0 1-2 2A18 18 0 0 1 3 5a2 2 0 0 1 2-2h3.5a2 2 0 0 1 2 2c0 1.25.26 2.45.7 3.57a2 2 0 0 1-.45 2.11L9.5 11.9" />
+            <line x1="1" y1="1" x2="23" y2="23" />
+          </svg>
+        </button>
+        <button class="call-btn accept" id="accept-btn" title="Accept">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round" width="22" height="22">
+            <path
+              d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.62 3.38 2 2 0 0 1 3.6 1.21h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Active call controls — row 1: secondary controls -->
+      <div class="call-buttons call-buttons-secondary" id="call-secondary-buttons" style="display:none;">
+        <!-- Speaker -->
+        <button class="call-btn-sm" id="speaker-btn" title="Speaker">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round" width="18" height="18">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
+          </svg>
+        </button>
+        <!-- Flip camera -->
+        <button class="call-btn-sm" id="flip-btn" title="Flip camera" style="display:none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round" width="18" height="18">
+            <path d="M1 4v6h6" />
+            <path d="M23 20v-6h-6" />
+            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15" />
+          </svg>
+        </button>
+        <!-- Screen share -->
+        <button class="call-btn-sm" id="screenshare-btn" title="Share screen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round" width="18" height="18">
+            <rect x="2" y="3" width="20" height="14" rx="2" />
+            <line x1="8" y1="21" x2="16" y2="21" />
+            <line x1="12" y1="17" x2="12" y2="21" />
+          </svg>
+        </button>
+        <!-- Raise hand -->
+        <button class="call-btn-sm" id="raise-hand-btn" title="Raise hand">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round" width="18" height="18">
+            <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0" />
+            <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2" />
+            <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8" />
+            <path
+              d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Active call controls — row 2: primary controls -->
+      <div class="call-buttons" id="call-control-buttons">
+        <button class="call-btn mute" id="mute-btn" title="Mute">
+          <svg id="mute-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+            <path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z" />
+            <path d="M19 10a7 7 0 0 1-14 0" />
+            <line x1="12" y1="19" x2="12" y2="23" />
+            <line x1="8" y1="23" x2="16" y2="23" />
+          </svg>
+        </button>
+        <button class="call-btn end" id="end-call-btn" title="End call">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
+            stroke-linejoin="round" width="22" height="22">
+            <path
+              d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c1.12.45 2.3.7 3.53.7a2 2 0 0 1 2 2v3.5a2 2 0 0 1-2 2A18 18 0 0 1 3 5a2 2 0 0 1 2-2h3.5a2 2 0 0 1 2 2c0 1.25.26 2.45.7 3.57a2 2 0 0 1-.45 2.11L9.5 11.9" />
+            <line x1="1" y1="1" x2="23" y2="23" />
+          </svg>
+        </button>
+        <button class="call-btn vid" id="cam-btn" title="Camera">
+          <svg id="cam-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+            <polygon points="23 7 16 12 23 17 23 7" />
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- IMAGE LIGHTBOX -->
+  <div id="lightbox">
+    <img id="lightbox-img" src="" alt="">
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast"></div>
+
+  <!-- SETTINGS PANEL -->
+  <div id="settings-overlay"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:900;backdrop-filter:blur(4px);"></div>
+  <div id="settings-panel" style="display:none;position:fixed;top:0;right:0;bottom:0;width:320px;max-width:92vw;
+       background:var(--bg-secondary);border-left:1px solid var(--border);z-index:901;
+       flex-direction:column;overflow-y:auto;
+       transform:translateX(100%);transition:transform 0.3s cubic-bezier(0.22,1,0.36,1);">
+    <div
+      style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0;">
+      <span style="font-size:16px;font-weight:600;letter-spacing:1px;color:var(--accent);">SETTINGS</span>
+      <button id="settings-close-btn"
+        style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;padding:4px;">✕</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:24px;">
+
+      <!-- Profile section -->
+      <div>
+        <div
+          style="font-size:11px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:12px;">
+          Profile</div>
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
+          <canvas id="settings-avatar" width="52" height="52" style="border-radius:50%;flex-shrink:0;"></canvas>
+          <div>
+            <div id="settings-display-name" style="font-size:15px;font-weight:600;"></div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Anonymous</div>
+          </div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:6px;">Status</label>
+          <select id="settings-status-preset" onchange="onStatusPresetChange()"
+            style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);border-radius:8px;padding:9px 12px;font-size:13px;outline:none;cursor:pointer;">
+            <option value="">— Select preset —</option>
+            <option value="available">available</option>
+            <option value="lurking">lurking</option>
+            <option value="busy">busy</option>
+            <option value="in the grid">in the grid</option>
+            <option value="ghost mode">ghost mode</option>
+            <option value="do not disturb">do not disturb</option>
+            <option value="custom">custom…</option>
+          </select>
+        </div>
+        <input id="settings-status-custom" type="text" maxlength="40" placeholder="Custom status…"
+          style="display:none;width:100%;background:var(--bg-tertiary);border:1px solid rgba(var(--accent-rgb),0.3);
+                 color:var(--text-primary);border-radius:8px;padding:9px 12px;font-size:13px;outline:none;box-sizing:border-box;" />
+      </div>
+
+      <!-- Notifications -->
+      <div>
+        <div
+          style="font-size:11px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:12px;">
+          Notifications</div>
+        <label class="settings-toggle-row">
+          <span>Message sounds</span>
+          <div class="settings-toggle" id="toggle-sounds" data-on="true"></div>
+        </label>
+        <label class="settings-toggle-row">
+          <span>Call sounds</span>
+          <div class="settings-toggle" id="toggle-call-sounds" data-on="true"></div>
+        </label>
+      </div>
+
+      <!-- Privacy -->
+      <div>
+        <div
+          style="font-size:11px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:12px;">
+          Privacy</div>
+        <label class="settings-toggle-row">
+          <span>Send read receipts</span>
+          <div class="settings-toggle" id="toggle-read-receipts" data-on="true">
+          </div>
+        </label>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- DEBUG PANEL — only visible in dev mode, fixed bottom-right corner -->
+  <div id="debugPanel" style="display:none;position:fixed;bottom:10px;right:10px;width:260px;
+       background:#0f172a;color:#e2e8f0;font-size:12px;font-family:monospace;
+       border-radius:10px;padding:12px 14px;z-index:9999;
+       box-shadow:0 0 20px rgba(0,0,0,0.6);border:1px solid rgba(0,255,136,0.2);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <strong style="color:#00ff88;">🛠 DEBUG</strong>
+      <button onclick="document.getElementById('debugPanel').style.display='none'"
+        style="background:none;border:none;color:#64748b;cursor:pointer;font-size:14px;">✕</button>
+    </div>
+    <div id="dbg-conn" style="margin:3px 0;"></div>
+    <div id="dbg-conn-type" style="margin:3px 0;"></div>
+    <div id="dbg-user" style="margin:3px 0;"></div>
+    <div id="dbg-room" style="margin:3px 0;"></div>
+    <div id="dbg-key" style="margin:3px 0;"></div>
+    <div id="dbg-queue" style="margin:3px 0;"></div>
+    <div id="dbg-decrypt" style="margin:3px 0;"></div>
+    <div id="dbg-socket" style="margin:3px 0;"></div>
+  </div>
+
+  <!-- V1 compatibility layer - forwards to V2 modules -->
+  <script>
+    // V1 functions forward to V2 implementations
+    // This prevents dead buttons during migration
+    
+    // Sidebar
+    window.toggleSidebar = function(show) {
+      const sidebar = document.querySelector('.sidebar');
+      const overlay = document.getElementById('sidebar-overlay');
+      if (sidebar) {
+        sidebar.classList.toggle('open', show);
+      }
+      if (overlay) {
+        overlay.style.display = show ? 'block' : 'none';
+      }
+    };
+    window.toggleSidebarCollapse = function() {
+      const sidebar = document.querySelector('.sidebar');
+      if (sidebar) {
+        sidebar.classList.toggle('collapsed');
+      }
+    };
+    
+    // Chat switching
+    window.switchChat = function(chatId) {
+      if (window.LANCHAT && window.LANCHAT.state && window.LANCHAT.state.chat) {
+        window.LANCHAT.state.chat.setCurrentChat(chatId);
+      }
+    };
+    
+    // Room management
+    window.openRoomModal = function(mode) {
+      const modal = document.getElementById('room-modal');
+      if (modal) {
+        modal.style.display = 'flex';
+        if (mode === 'create') {
+          document.getElementById('room-modal-create').style.display = 'block';
+          document.getElementById('room-modal-join').style.display = 'none';
+        } else {
+          document.getElementById('room-modal-create').style.display = 'none';
+          document.getElementById('room-modal-join').style.display = 'block';
+        }
+      }
+    };
+    window.closeRoomModal = function() {
+      const modal = document.getElementById('room-modal');
+      if (modal) {
+        modal.style.display = 'none';
+      }
+    };
+    window.setRoomVis = function(vis) {
+      // Direct DOM manipulation for now - will migrate to V2
+      const pubBtn = document.getElementById('rm-vis-public');
+      const privBtn = document.getElementById('rm-vis-private');
+      const pwWrap = document.getElementById('rm-password-wrap');
+      if (vis === 'public') {
+        pubBtn.style.border = '1.5px solid var(--accent)';
+        privBtn.style.border = '1px solid var(--border)';
+        pwWrap.style.display = 'none';
+      } else {
+        pubBtn.style.border = '1px solid var(--border)';
+        privBtn.style.border = '1.5px solid var(--accent)';
+        pwWrap.style.display = 'block';
+      }
+    };
+    window.submitCreateRoom = function() {
+      if (window.LANCHAT && window.LANCHAT.rooms && window.LANCHAT.rooms.manager && window.LANCHAT.rooms.ui) {
+        const data = window.LANCHAT.rooms.ui.getCreateRoomFormData();
+        window.LANCHAT.rooms.manager.createRoom(data, window.state.socket);
+        window.LANCHAT.rooms.ui.hideRoomModal();
+      }
+    };
+    window.submitJoinRoom = function() {
+      if (window.LANCHAT && window.LANCHAT.rooms && window.LANCHAT.rooms.manager && window.LANCHAT.rooms.ui) {
+        const data = window.LANCHAT.rooms.ui.getJoinRoomFormData();
+        window.LANCHAT.rooms.manager.joinPrivateRoom(data.roomId, data.password, window.state.socket);
+        window.LANCHAT.rooms.ui.hideRoomModal();
+      }
+    };
+    window.submitJoinPrivateRoom = function() {
+      if (window.LANCHAT && window.LANCHAT.rooms && window.LANCHAT.rooms.manager && window.LANCHAT.rooms.ui) {
+        const data = window.LANCHAT.rooms.ui.getJoinRoomFormData();
+        window.LANCHAT.rooms.manager.joinPrivateRoom(data.roomId, data.password, window.state.socket);
+        window.LANCHAT.rooms.ui.hideRoomModal();
+      }
+    };
+    window.leaveRoom = function() {
+      if (window.LANCHAT && window.LANCHAT.rooms && window.LANCHAT.rooms.manager) {
+        window.LANCHAT.rooms.manager.leaveRoom(window.state.socket);
+      }
+    };
+    
+    // Settings
+    window.openSettings = function() {
+      const modal = document.getElementById('settings-modal');
+      if (modal) {
+        modal.style.display = 'flex';
+      }
+    };
+    window.toggleSettingSound = function() {
+      if (window.LANCHAT && window.LANCHAT.state && window.LANCHAT.state.ui) {
+        window.LANCHAT.state.ui.toggleSoundMute();
+      }
+    };
+    window.toggleSettingCallSound = function() {
+      console.log('[V1→V2] Call sound setting - implement');
+    };
+    window.toggleSettingReadReceipts = function() {
+      console.log('[V1→V2] Read receipts setting - implement');
+    };
+    window.onStatusPresetChange = function() {
+      console.log('[V1→V2] Status preset - implement');
+    };
+    
+    // Chat search
+    window.toggleChatSearch = function() {
+      const search = document.getElementById('chat-search');
+      if (search) {
+        search.style.display = search.style.display === 'none' ? 'flex' : 'none';
+      }
+    };
+    window.runChatSearch = function(query) {
+      console.log('[V1→V2] Chat search:', query);
+    };
+    window.chatSearchKey = function(event) {
+      if (event.key === 'Enter') {
+        // Search
+      } else if (event.key === 'Escape') {
+        window.toggleChatSearch();
+      }
+    };
+    window.chatSearchNav = function(direction) {
+      console.log('[V1→V2] Chat search nav:', direction);
+    };
+    
+    // Sound
+    window.toggleSoundMute = function() {
+      if (window.LANCHAT && window.LANCHAT.state && window.LANCHAT.state.ui) {
+        window.LANCHAT.state.ui.toggleSoundMute();
+      }
+    };
+    
+    // Calls
+    window.endCall = function(reason) {
+      if (window.LANCHAT && window.LANCHAT.lifecycle) {
+        window.LANCHAT.lifecycle.endCall(reason);
+      } else {
+        console.warn('[V1→V2] Lifecycle module not loaded');
+      }
+    };
+    window.startCall = function(type) {
+      console.log('[V1→V2] Start call:', type);
+      // Will implement with V2 call module
+    };
+    
+    // Messages
+    window.submitMessage = function() {
+      const input = document.getElementById('msg-input');
+      if (input && window.LANCHAT && window.LANCHAT.messages && window.LANCHAT.messages.sender) {
+        window.LANCHAT.messages.sender.send(input.value, window.state.currentChat, window.state.socket);
+        input.value = '';
+      }
+    };
+    window.uploadFile = function(input) {
+      if (window.LANCHAT && window.LANCHAT.features && window.LANCHAT.features.files) {
+        const file = input.files[0];
+        window.LANCHAT.features.files.upload(file, window.state.socket);
+      }
+    };
+    
+    // Room ID
+    window.copyRoomId = function() {
+      if (window.LANCHAT && window.LANCHAT.state && window.LANCHAT.state.chat) {
+        const roomId = window.LANCHAT.state.chat.currentRoom;
+        if (roomId) {
+          navigator.clipboard.writeText(roomId);
+          const btn = document.getElementById('copy-room-id-btn');
+          if (btn) {
+            btn.textContent = '✓ Copied!';
+            setTimeout(() => btn.textContent = '📋 Copy', 2000);
+          }
+        }
+      }
+    };
+    
+    // Additional inline handlers
+    window.handleKey = function(event) {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        window.submitMessage();
+      }
+    };
+    window.onTyping = function(element) {
+      if (window.LANCHAT && window.LANCHAT.features && window.LANCHAT.features.typing) {
+        window.LANCHAT.features.typing.start(element.value, window.state.currentChat, window.state.socket);
+      }
+    };
+    window.toggleRecord = function() {
+      if (window.LANCHAT && window.LANCHAT.features && window.LANCHAT.features.voiceMessages) {
+        window.LANCHAT.features.voiceMessages.toggle();
+      }
+    };
+    window.filterChats = function() {
+      const query = document.getElementById('search-box').value.toLowerCase();
+      const items = document.querySelectorAll('.chat-item');
+      items.forEach(item => {
+        const name = item.querySelector('.chat-name')?.textContent.toLowerCase() || '';
+        item.style.display = name.includes(query) ? 'flex' : 'none';
+      });
+    };
+    window.rotateRoomKey = function() {
+      if (window.LANCHAT && window.LANCHAT.rooms && window.LANCHAT.rooms.manager) {
+        window.LANCHAT.rooms.manager.rotateRoomKey(window.state.currentRoom, window.state.socket);
+      }
+    };
+    window.scrollToBottom = function() {
+      const container = document.getElementById('messages');
+      if (container) {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      }
+    };
+  </script>
+  <!-- End V1 compatibility layer -->
+
+  <!-- ROOM MODAL -->
+  <div id="room-modal" onclick="if(event.target===this)closeRoomModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);
+              z-index:800;align-items:center;justify-content:center;">
+    <div style="background:var(--bg-secondary);border-radius:16px;padding:28px 24px;
+                width:320px;max-width:92vw;box-shadow:0 20px 60px rgba(0,0,0,0.6);
+                border:1px solid var(--border);">
+
+      <!-- Create Room panel -->
+      <div id="room-modal-create">
+        <h3 style="margin-bottom:18px;font-size:17px;">🏠 Create Room</h3>
+
+        <input id="rm-name" type="text" maxlength="32" placeholder="Room name"
+          onkeydown="if(event.key==='Enter')submitCreateRoom()" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);
+                 border-radius:8px;padding:10px 12px;color:var(--text-primary);font-size:14px;
+                 outline:none;margin-bottom:10px;box-sizing:border-box;" />
+
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <button id="rm-vis-public" onclick="setRoomVis('public')" style="flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--accent);
+                   background:rgba(0,255,136,0.15);color:var(--accent);font-size:13px;
+                   font-weight:600;cursor:pointer;">🌐 Public</button>
+          <button id="rm-vis-private" onclick="setRoomVis('private')" style="flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--border);
+                   background:var(--bg-tertiary);color:var(--text-secondary);font-size:13px;
+                   font-weight:600;cursor:pointer;">🔒 Private</button>
+        </div>
+
+        <div id="rm-password-wrap" style="display:none;margin-bottom:10px;">
+          <input id="rm-password" type="text" maxlength="64" placeholder="Password (optional)"
+            onkeydown="if(event.key==='Enter')submitCreateRoom()" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);
+                   border-radius:8px;padding:10px 12px;color:var(--text-primary);font-size:14px;
+                   outline:none;box-sizing:border-box;" />
+          <!-- Require approval toggle (private rooms only) -->
+          <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;
+                        color:var(--text-secondary);font-size:13px;">
+            <input type="checkbox" id="rm-require-approval"
+              style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;" />
+            Require admin approval to join
+          </label>
+        </div>
+
+        <select id="rm-ttl" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);
+                 border-radius:8px;padding:10px 12px;color:var(--text-primary);font-size:14px;
+                 outline:none;margin-bottom:16px;cursor:pointer;box-sizing:border-box;">
+          <option value="session">⏳ Session (until empty)</option>
+          <option value="5min">5 minutes</option>
+          <option value="1hour">1 hour</option>
+        </select>
+
+        <div style="display:flex;gap:8px;">
+          <button onclick="closeRoomModal()" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border);
+                   background:none;color:var(--text-secondary);font-size:14px;cursor:pointer;">Cancel</button>
+          <button onclick="submitCreateRoom()" style="flex:1;padding:10px;border-radius:8px;border:none;background:var(--accent);
+                   color:#0a0e13;font-size:14px;font-weight:700;cursor:pointer;">Create</button>
+        </div>
+      </div>
+
+      <!-- Join Private Room panel -->
+      <div id="room-modal-join" style="display:none;">
+        <h3 style="margin-bottom:18px;font-size:17px;">🔑 Join Private Room</h3>
+
+        <input id="rm-join-id" type="text" maxlength="16" placeholder="Room ID (e.g. A3F9B2C1)"
+          onkeydown="if(event.key==='Enter')document.getElementById('rm-join-password').focus()" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);
+                 border-radius:8px;padding:10px 12px;color:var(--text-primary);font-size:14px;
+                 outline:none;margin-bottom:10px;font-family:monospace;letter-spacing:1px;
+                 box-sizing:border-box;" />
+
+        <input id="rm-join-password" type="text" maxlength="64" placeholder="Password (if required)"
+          onkeydown="if(event.key==='Enter')submitJoinPrivateRoom()" style="width:100%;background:var(--bg-tertiary);border:1.5px solid var(--border);
+                 border-radius:8px;padding:10px 12px;color:var(--text-primary);font-size:14px;
+                 outline:none;margin-bottom:16px;box-sizing:border-box;" />
+
+        <div style="display:flex;gap:8px;">
+          <button onclick="closeRoomModal()" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border);
+                   background:none;color:var(--text-secondary);font-size:14px;cursor:pointer;">Cancel</button>
+          <button onclick="submitJoinPrivateRoom()" style="flex:1;padding:10px;border-radius:8px;border:none;background:var(--accent);
+                   color:#0a0e13;font-size:14px;font-weight:700;cursor:pointer;">Join</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+
+</html>
