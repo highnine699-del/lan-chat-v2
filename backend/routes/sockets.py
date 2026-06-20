@@ -1,8 +1,6 @@
 # Copyright (c) 2026 ODETAYO JOSIAH INIOLUWA. Licensed under the MIT License - see LICENSE file for details.
 
 import logging
-logging.basicConfig(filename='startup_debug.log', level=logging.INFO, format='%(asctime)s - %(message)s')
-logging.info("SOCKETS_STEP 1: Starting routes/sockets.py")
 """
 routes/sockets.py — Socket.IO handler registration.
 

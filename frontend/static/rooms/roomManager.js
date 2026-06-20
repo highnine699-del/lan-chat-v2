@@ -142,17 +142,28 @@ export const roomManager = {
    * Handle room created event
    * @param {Object} data - Room data
    */
-  handleRoomCreated(data) {
+  async handleRoomCreated(data) {
     const { room_id, name, visibility, key } = data;
 
     // Store room key if provided
     if (key) {
-      encryption.importRoomKey(room_id, key);
+      await encryption.importRoomKey(room_id, key);
     }
 
     // Update state
     chatState.setCurrentRoom(room_id, name);
     if (!chatState.messages[room_id]) chatState.messages[room_id] = [];
+
+    // Creator generates the room key and sends it to the server
+    // so it can be redistributed to members who join later
+    try {
+      const socket = chatState.getSocket();
+      if (socket) {
+        await this.rotateRoomKey(room_id, socket);
+      }
+    } catch (err) {
+      console.error('[RoomManager] Failed to generate initial room key:', err);
+    }
 
     eventBus.emit('room:created', data);
   },
@@ -161,12 +172,14 @@ export const roomManager = {
    * Handle room joined event
    * @param {Object} data - Room data
    */
-  handleRoomJoined(data) {
-    const { room_id, name, members, key } = data;
+  async handleRoomJoined(data) {
+    // server sends 'session_key' (not 'key') in room:joined
+    const { room_id, name, members, session_key, key } = data;
+    const roomKey = session_key || key;  // accept either field name
 
-    // Store room key
-    if (key) {
-      encryption.importRoomKey(room_id, key);
+    // Store room key so messages can be encrypted/decrypted
+    if (roomKey) {
+      await encryption.importRoomKey(room_id, roomKey);
     }
 
     // Update state

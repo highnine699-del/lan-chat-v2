@@ -7,6 +7,7 @@
  */
 
 import { decryption } from './decryption.js';
+import { encryption } from '../core/encryption.js';
 import { renderer } from './renderer.js';
 import { chatState } from '../core/state/chatState.js';
 import { cryptoState } from '../core/state/cryptoState.js';

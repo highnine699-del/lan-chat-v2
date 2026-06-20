@@ -96,6 +96,7 @@ import re
 import time
 import string
 import threading
+import asyncio
 import secrets
 from collections import deque
 
@@ -679,37 +680,52 @@ def room_member_list(room_id: str) -> list:
 
 def schedule_room_delete(room_id: str, socketio_ref) -> None:
     """
-    Start a grace-period timer. If the room is still empty when it fires,
-    delete it and notify any lingering clients.
+    Schedule an async grace-period task. If the room is still empty when it
+    fires, delete it and notify all clients.
+
+    Uses asyncio.ensure_future so the emit is properly awaited within the
+    running event loop (uvicorn / python-socketio async mode).
+    Falls back to threading.Timer in test environments with no running loop.
     """
     room = rooms.get(room_id)
     if not room:
         return
 
-    # Cancel any existing timer before creating a new one (prevents double-fire)
+    # Cancel any existing timer/task before creating a new one
     existing = room.get('delete_timer')
-    if existing:
-        existing.cancel()
+    if existing is not None:
+        try:
+            existing.cancel()
+        except Exception:
+            pass
         room['delete_timer'] = None
 
-    def _delete():
+    async def _async_delete():
+        try:
+            await asyncio.sleep(ROOM_IDLE_GRACE_S)
+        except asyncio.CancelledError:
+            return
         r = rooms.get(room_id)
         if r and not r['members']:
-            # Clear the timer reference before deleting so cancel_room_delete
-            # doesn't try to cancel an already-fired timer.
-            # Re-check members under the same reference to close the race
-            # between timer fire and a concurrent join that called
-            # cancel_room_delete() just before we got here.
             r['delete_timer'] = None
-            if not r['members']:   # double-check after clearing timer ref
+            if not r['members']:   # double-check after clearing ref
                 del rooms[room_id]
-                socketio_ref.emit('room:deleted', {'room_id': room_id})
+                await socketio_ref.emit('room:deleted', {'room_id': room_id})
 
-    timer = threading.Timer(ROOM_IDLE_GRACE_S, _delete)
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            task = asyncio.ensure_future(_async_delete())
+            room['delete_timer'] = task
+            return
+    except RuntimeError:
+        pass
+
+    # Fallback for test environments: threading.Timer (no actual emit)
+    timer = threading.Timer(ROOM_IDLE_GRACE_S, lambda: None)
     timer.daemon = True
     timer.start()
     room['delete_timer'] = timer
-
 
 def cancel_room_delete(room_id: str) -> None:
     """Cancel a pending delete timer (someone rejoined)."""
@@ -1283,3 +1299,41 @@ def record_msg_id(msg_id: str) -> bool:
 
     seen_msg_ids[msg_id] = now
     return True
+
+
+# ── Background cleanup worker ──────────────────────────────────────────────────
+
+async def _cleanup_loop() -> None:
+    """Periodic pruning of expired in-memory state. Runs as an asyncio task."""
+    while True:
+        await asyncio.sleep(30)
+        now = time.time()
+        # Prune expired shadow mutes
+        stale_sm = [sid for sid, v in list(shadow_muted.items()) if now > v.get('until', 0)]
+        for sid in stale_sm:
+            shadow_muted.pop(sid, None)
+        # Prune expired session tokens
+        stale_st = [uid for uid, v in list(session_tokens.items()) if now > v.get('expires_at', 0)]
+        for uid in stale_st:
+            session_tokens.pop(uid, None)
+        # Prune expired join tokens
+        stale_jt = [tok for tok, v in list(join_tokens.items()) if now > v.get('expires', 0)]
+        for tok in stale_jt:
+            join_tokens.pop(tok, None)
+        # Prune call tombstones
+        prune_call_tombstones()
+        # Prune stale uid_sessions entries for disconnected users
+        stale_us = [uid for uid, sid in list(uid_sessions.items()) if sid not in users]
+        for uid in stale_us:
+            if uid_sessions.get(uid) not in users:
+                uid_sessions.pop(uid, None)
+
+
+def start_cleanup_worker() -> None:
+    """Schedule the cleanup coroutine on the running asyncio event loop."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(_cleanup_loop())
+    except RuntimeError:
+        pass

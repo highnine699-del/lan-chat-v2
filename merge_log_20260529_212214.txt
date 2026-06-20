@@ -1,1 +1,0 @@
-[21:22:14] [CRITICAL] Fatal error: 'charmap' codec can't encode character '\U0001f916' in position 18: character maps to <undefined>

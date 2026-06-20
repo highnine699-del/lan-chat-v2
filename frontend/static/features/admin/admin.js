@@ -1,79 +1,70 @@
 /**
  * features/admin/admin.js
- * 
- * Admin controls feature.
- * Handles admin operations like kick, ban, mute, and room management.
+ *
+ * Admin controls.
+ * Event names match the backend socket_admin.py handlers exactly.
  */
 
 import { eventBus } from '../../core/eventBus.js';
 
 export const admin = {
   /**
-   * Kick a user from a room
-   * @param {string} username - Username to kick
-   * @param {string} roomId - Room ID
-   * @param {Object} socket - Socket instance
+   * Kick a user from a room (room-admin action).
+   * Backend: admin:kick  { target, room_id }
    */
   kickUser(username, roomId, socket) {
-    socket.emit('admin:kick', { username, room_id: roomId });
+    socket.emit('admin:kick', { target: username, room_id: roomId });
     eventBus.emit('admin:user_kicked', { username, roomId });
   },
 
   /**
-   * Ban a user from the server
-   * @param {string} username - Username to ban
-   * @param {Object} socket - Socket instance
+   * Server-kick a user (server-admin action).
+   * Backend: admin:server_kick / admin:ban  { target }
    */
   banUser(username, socket) {
-    socket.emit('admin:ban', { username });
+    socket.emit('admin:server_kick', { target: username });
     eventBus.emit('admin:user_banned', { username });
   },
 
   /**
-   * Mute a user globally
-   * @param {string} username - Username to mute
-   * @param {number} duration - Duration in seconds
-   * @param {Object} socket - Socket instance
+   * Shadow-mute a user globally (server-admin action).
+   * Backend: admin:mute / admin:server_shadow_mute  { target, duration }
    */
   muteUser(username, duration, socket) {
-    socket.emit('admin:mute', { username, duration });
+    socket.emit('admin:mute', { target: username, duration });
     eventBus.emit('admin:user_muted', { username, duration });
   },
 
   /**
-   * Unmute a user
-   * @param {string} username - Username to unmute
-   * @param {Object} socket - Socket instance
+   * Unmute a user (server-admin action).
+   * Backend: admin:unmute  { target }
    */
   unmuteUser(username, socket) {
-    socket.emit('admin:unmute', { username });
+    socket.emit('admin:unmute', { target: username });
     eventBus.emit('admin:user_unmuted', { username });
   },
 
   /**
-   * Freeze a room
-   * @param {string} roomId - Room ID
-   * @param {Object} socket - Socket instance
+   * Freeze a room (room-admin action).
+   * Backend: admin:freeze  { room_id, freeze: true }
    */
   freezeRoom(roomId, socket) {
-    socket.emit('admin:freeze_room', { room_id: roomId });
+    socket.emit('admin:freeze', { room_id: roomId, freeze: true });
     eventBus.emit('admin:room_frozen', { roomId });
   },
 
   /**
-   * Unfreeze a room
-   * @param {string} roomId - Room ID
-   * @param {Object} socket - Socket instance
+   * Unfreeze a room (room-admin action).
+   * Backend: admin:freeze  { room_id, freeze: false }
    */
   unfreezeRoom(roomId, socket) {
-    socket.emit('admin:unfreeze_room', { room_id: roomId });
+    socket.emit('admin:freeze', { room_id: roomId, freeze: false });
     eventBus.emit('admin:room_unfrozen', { roomId });
   },
 
   /**
-   * Delete a room
-   * @param {string} roomId - Room ID
-   * @param {Object} socket - Socket instance
+   * Delete a room (server-admin or room-admin action).
+   * Backend: admin:delete_room  { room_id }
    */
   deleteRoom(roomId, socket) {
     if (confirm('Are you sure you want to delete this room?')) {
@@ -83,47 +74,26 @@ export const admin = {
   },
 
   /**
-   * Handle admin kick event
-   * @param {Object} data - Kick data
+   * Grant or revoke room-mod status.
+   * Backend: admin:mod  { target, room_id, grant }
    */
+  setMod(username, roomId, grant, socket) {
+    socket.emit('admin:mod', { target: username, room_id: roomId, grant });
+    eventBus.emit('admin:mod_changed', { username, roomId, grant });
+  },
+
   handleKicked(data) {
     eventBus.emit('admin:kicked', data);
   },
 
-  /**
-   * Handle admin ban event
-   * @param {Object} data - Ban data
-   */
-  handleBanned(data) {
-    eventBus.emit('admin:banned', data);
-  },
-
-  /**
-   * Handle admin mute event
-   * @param {Object} data - Mute data
-   */
-  handleMuted(data) {
-    eventBus.emit('admin:muted', data);
-  },
-
-  /**
-   * Check if current user is admin
-   * @param {Object} state - App state
-   * @returns {boolean} True if admin
-   */
   isAdmin(state) {
-    return state.isServerAdmin || false;
+    return state?.isServerAdmin || false;
   },
 
-  /**
-   * Check if user is room admin
-   * @param {string} roomId - Room ID
-   * @param {Object} state - App state
-   * @returns {boolean} True if room admin
-   */
-  isRoomAdmin(roomId, state) {
-    // This would need to be implemented based on room membership data
-    // For now, return false
-    return false;
-  }
+  isRoomAdmin(roomId, myDisplay, roomMembers) {
+    // roomMembers array from room:members event — check is_admin flag
+    if (!roomMembers) return false;
+    const me = roomMembers.find(m => m.display === myDisplay);
+    return me ? !!me.is_admin : false;
+  },
 };

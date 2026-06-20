@@ -1,9 +1,12 @@
 @echo off
-REM Kill any Python process on port 8000
-for /f "tokens=5" %%a in ('netstat -ano ^| find ":8000"') do (
-    taskkill /F /PID %%a
+setlocal
+
+REM ── Kill any process on port 8000 ────────────────────────────────────────────
+for /f "tokens=5" %%a in ('netstat -ano ^| find ":8000" 2^>nul') do (
+    taskkill /F /PID %%a >nul 2>&1
 )
 
-REM Start the server using uvicorn directly
-cd /d "C:\Users\AY ADVANCE TECH\Documents\lan-chat-v2\backend"
-python -m uvicorn socket_manager:socket_app --host 0.0.0.0 --port 8000
+REM ── Launch server from the backend directory ──────────────────────────────────
+cd /d "%~dp0backend"
+python -m uvicorn app:asgi_app --host 0.0.0.0 --port 8000 --log-level info
+endlocal

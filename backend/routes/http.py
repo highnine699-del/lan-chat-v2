@@ -342,19 +342,21 @@ async def shutdown(request: Request, x_admin_key: str = Header(None, alias="X-Ad
     log.info('Graceful shutdown requested via /shutdown')
 
     def _do_shutdown():
-        # Import socketio reference from the app context
+        import asyncio
+        from socket_manager import sio as _sio
         try:
-            # TODO: Get socketio reference from app state
-            # socketio.emit('server_shutdown', {
-            #     'message': '⚠️ Server is shutting down. See you next time!',
-            #     'delay':   3,
-            # })
-            pass
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(_sio.emit('system_message', {
+                'type': 'system',
+                'text': '⚠️  Server is shutting down. See you next time!',
+                'time': int(time.time() * 1000),
+            }))
+            loop.close()
         except Exception:
             pass
-        time.sleep(3)   # give clients time to receive the notice
+        time.sleep(3)
         import os as _os
-        _os.kill(_os.getpid(), 15)   # SIGTERM — clean exit
+        _os.kill(_os.getpid(), 15)
 
     threading.Thread(target=_do_shutdown, daemon=True).start()
 
@@ -384,16 +386,18 @@ async def admin_broadcast(
         raise HTTPException(status_code=400, detail='message field is required')
 
     try:
-        # TODO: Get socketio reference from app state
-        # socketio.emit('new_message', {
-        #     'from':    '📢 Server',
-        #     'msg':     message,
-        #     'target':  'global',
-        #     'msg_id':  f'srv_{int(time.time()*1000)}',
-        #     'ts':      time.time(),
-        #     'is_system': True,
-        # })
-        pass
+        import asyncio
+        from socket_manager import sio as _sio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_sio.emit('new_message', {
+            'from':      '📢 Server',
+            'msg':       message,
+            'target':    'global',
+            'msg_id':    f'srv_{int(time.time()*1000)}',
+            'ts':        time.time(),
+            'is_system': True,
+        }))
+        loop.close()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

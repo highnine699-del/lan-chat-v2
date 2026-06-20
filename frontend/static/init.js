@@ -167,7 +167,7 @@ window.LANCHAT = {
 // reference LANCHAT.state, LANCHAT.lifecycle, LANCHAT.ui, LANCHAT.mood directly
 // But init.js overwrites window.LANCHAT, so we need to restore these references
 // for compatibility with the legacy call module architecture
-window.LANCHAT.state = callState;
+// callState is available via LANCHAT.call.state — do NOT overwrite LANCHAT.state
 window.LANCHAT.lifecycle = lifecycle;
 window.LANCHAT.ui = callUI;
 window.LANCHAT.mood = moodEngine;
@@ -345,6 +345,15 @@ async function init() {
   });
   roomPage.init();
 
+  // ── Expose room-modal functions on window for inline HTML onclick handlers ──
+  // The HTML uses onclick="closeRoomModal()" etc. which need global functions.
+  // Since init.js is type="module" nothing is global by default, so we assign
+  // them explicitly. They close over the local roomPage instance.
+  window.closeRoomModal        = () => roomPage.hideRoomModal();
+  window.submitCreateRoom      = () => roomPage.submitCreateRoom();
+  window.setRoomVis            = (vis) => roomPage.setRoomVis(vis);
+  window.submitJoinPrivateRoom = () => roomPage.submitJoinRoom();
+
   const callUI = new CallUI({
     onStartCall: (type) => {
       if (window.LANCHAT && window.LANCHAT.call && window.LANCHAT.call.controlPlane) {
@@ -463,6 +472,15 @@ function attachUIListeners() {
       usernameInput.focus();
     });
   }
+
+
+  // ── Handle being kicked by an admin ──────────────────────────────────────
+  eventBus.on('socket:admin_kicked', (data) => {
+    const reason = data?.reason || 'You were removed by an admin.';
+    alert(reason);
+    // Reload to reset state cleanly
+    window.location.reload();
+  });
 
   console.log('[LAN Chat V2] [DEBUG] All UI listeners attached');
 

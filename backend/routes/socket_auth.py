@@ -104,7 +104,7 @@ def register_auth_handlers(sio):
             if not SERVER_PASSWORD:
                 await err(sid, 'Server is in public mode but no password is configured.', 'SERVER_LOCKED')
                 return
-            client_server_pw = str(data.get('server_password', ''))
+            client_server_pw = str(data.get('password', '') or data.get('server_password', ''))
             if client_server_pw != SERVER_PASSWORD:
                 sec_log.warning('join: wrong server password from ip=%s', client_ip)
                 _sl.session_rejected(sid, client_ip, 'wrong_server_password', 'WRONG_PASSWORD')

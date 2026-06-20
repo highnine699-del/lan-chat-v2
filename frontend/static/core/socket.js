@@ -1,9 +1,9 @@
 /**
  * core/socket.js
- * 
- * Socket.IO client initialization.
- * Handles connection setup with proper transport configuration for ngrok compatibility.
- * V2 socket ownership - single socket.on handlers that emit to eventBus.
+ *
+ * Socket.IO client — single source of truth for all server events.
+ * Every server emission is received here and re-emitted on the eventBus
+ * so the rest of the app never has to touch the raw socket directly.
  */
 
 import { eventBus } from './eventBus.js';
@@ -11,19 +11,13 @@ import { eventBus } from './eventBus.js';
 export const socketClient = {
   socket: null,
 
-  /**
-   * Initialize Socket.IO connection
-   * @returns {Object} Socket.IO instance
-   */
   init() {
-    console.log('[LAN Chat V2] [DEBUG] Initializing socket client...');
+    console.log('[LAN Chat V2] Initializing socket client...');
 
-    // When running over ngrok (or any non-localhost origin), skip the polling
-    // transport entirely. ngrok intercepts polling HTTP requests with a browser
-    // warning page (returns 400), which breaks the Socket.IO handshake.
-    // WebSocket-only avoids that path and connects cleanly.
+    // When running over ngrok skip polling — ngrok intercepts HTTP polling
+    // with a browser warning page (returns 400).  WebSocket-only avoids that.
     const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-    
+
     this.socket = io({
       reconnection: true,
       reconnectionAttempts: 10,
@@ -33,44 +27,35 @@ export const socketClient = {
       extraHeaders: isLocal ? {} : { 'ngrok-skip-browser-warning': 'true' },
     });
 
-    // V2 socket lifecycle events - emit to eventBus
+    // ── Connection lifecycle ──────────────────────────────────────────────────
     this.socket.on('connect', () => {
-      console.log('[LAN Chat V2] [DEBUG] Socket connected');
+      console.log('[LAN Chat V2] Socket connected');
       eventBus.emit('socket:connected');
     });
 
     this.socket.on('disconnect', (reason) => {
-      console.log('[LAN Chat V2] [DEBUG] Socket disconnected:', reason);
+      console.log('[LAN Chat V2] Socket disconnected:', reason);
       eventBus.emit('socket:disconnected', { reason });
     });
 
-    this.socket.on('reconnect', (attemptNumber) => {
-      console.log('[LAN Chat V2] [DEBUG] Socket reconnected after', attemptNumber, 'attempts');
-      eventBus.emit('socket:reconnected', { attemptNumber });
+    this.socket.on('reconnect', (n) => {
+      console.log('[LAN Chat V2] Socket reconnected after', n, 'attempts');
+      eventBus.emit('socket:reconnected', { attemptNumber: n });
     });
 
-    this.socket.on('reconnect_attempt', (attemptNumber) => {
-      console.log('[LAN Chat V2] [DEBUG] Socket reconnect attempt:', attemptNumber);
-      eventBus.emit('socket:reconnect_attempt', { attemptNumber });
+    this.socket.on('reconnect_attempt', (n) => {
+      eventBus.emit('socket:reconnect_attempt', { attemptNumber: n });
     });
 
     this.socket.on('reconnect_error', (error) => {
-      console.error('[LAN Chat V2] [DEBUG] Socket reconnect error:', error);
       eventBus.emit('socket:reconnect_error', { error });
     });
 
     this.socket.on('reconnect_failed', () => {
-      console.error('[LAN Chat V2] [DEBUG] Socket reconnect failed');
       eventBus.emit('socket:reconnect_failed');
     });
 
-    // V2 application-level socket events - emit to eventBus
-    // These replace V1 socket handlers
-    // Event names match backend Socket.IO handlers
-    this.socket.on('new_message', (data) => {
-      eventBus.emit('socket:message', data);
-    });
-
+    // ── Auth / presence ───────────────────────────────────────────────────────
     this.socket.on('joined', (data) => {
       eventBus.emit('socket:joined', data);
     });
@@ -83,40 +68,8 @@ export const socketClient = {
       eventBus.emit('socket:system_message', data);
     });
 
-    this.socket.on('typing', (data) => {
-      eventBus.emit('socket:typing', data);
-    });
-
-    this.socket.on('stop_typing', (data) => {
-      eventBus.emit('socket:stop_typing', data);
-    });
-
-    this.socket.on('room:created', (data) => {
-      eventBus.emit('socket:room_created', data);
-    });
-
-    this.socket.on('room:list', (data) => {
-      eventBus.emit('socket:room_list', data);
-    });
-
-    this.socket.on('room:key', (data) => {
-      eventBus.emit('socket:room_key', data);
-    });
-
-    this.socket.on('room:left', (data) => {
-      eventBus.emit('socket:room_left', data);
-    });
-
-    this.socket.on('room:members', (data) => {
-      eventBus.emit('socket:room_members', data);
-    });
-
-    this.socket.on('room:frozen', (data) => {
-      eventBus.emit('socket:room_frozen', data);
-    });
-
-    this.socket.on('message_ack', (data) => {
-      eventBus.emit('socket:message_ack', data);
+    this.socket.on('error', (data) => {
+      eventBus.emit('socket:error', data);
     });
 
     this.socket.on('cooldown', (data) => {
@@ -135,6 +88,104 @@ export const socketClient = {
       eventBus.emit('socket:persona_switched', data);
     });
 
+    // ── Messages ──────────────────────────────────────────────────────────────
+    this.socket.on('new_message', (data) => {
+      eventBus.emit('socket:message', data);
+    });
+
+    this.socket.on('message_history', (data) => {
+      eventBus.emit('socket:message_history', data);
+    });
+
+    this.socket.on('message_ack', (data) => {
+      eventBus.emit('socket:message_ack', data);
+    });
+
+    // These were missing — backend emits message:edited, message:deleted, message:seen
+    this.socket.on('message:edited', (data) => {
+      eventBus.emit('socket:message_edited', data);
+    });
+
+    this.socket.on('message:deleted', (data) => {
+      eventBus.emit('socket:message_deleted', data);
+    });
+
+    this.socket.on('message:seen', (data) => {
+      eventBus.emit('socket:message_seen', data);
+    });
+
+    this.socket.on('hide_message', (data) => {
+      eventBus.emit('socket:hide_message', data);
+    });
+
+    this.socket.on('vote_count', (data) => {
+      eventBus.emit('socket:vote_count', data);
+    });
+
+    // ── Typing ────────────────────────────────────────────────────────────────
+    this.socket.on('typing', (data) => {
+      eventBus.emit('socket:typing', data);
+    });
+
+    this.socket.on('stop_typing', (data) => {
+      eventBus.emit('socket:stop_typing', data);
+    });
+
+    // ── Rooms ─────────────────────────────────────────────────────────────────
+    this.socket.on('room:created', (data) => {
+      eventBus.emit('socket:room_created', data);
+    });
+
+    // room:joined was missing — roomManager subscribes to this
+    this.socket.on('room:joined', (data) => {
+      eventBus.emit('socket:room_joined', data);
+    });
+
+    this.socket.on('room:left', (data) => {
+      eventBus.emit('socket:room_left', data);
+    });
+
+    this.socket.on('room:list', (data) => {
+      eventBus.emit('socket:room_list', data);
+    });
+
+    this.socket.on('room:key', (data) => {
+      eventBus.emit('socket:room_key', data);
+    });
+
+    this.socket.on('room:members', (data) => {
+      eventBus.emit('socket:room_members', data);
+    });
+
+    this.socket.on('room:frozen', (data) => {
+      eventBus.emit('socket:room_frozen', data);
+    });
+
+    this.socket.on('room:deleted', (data) => {
+      eventBus.emit('socket:room_deleted', data);
+    });
+
+    this.socket.on('room:knock', (data) => {
+      eventBus.emit('socket:room_knock', data);
+    });
+
+    this.socket.on('room:knock_pending', (data) => {
+      eventBus.emit('socket:room_knock_pending', data);
+    });
+
+    this.socket.on('room:join_approved', (data) => {
+      eventBus.emit('socket:room_join_approved', data);
+    });
+
+    this.socket.on('room:knock_denied', (data) => {
+      eventBus.emit('socket:room_knock_denied', data);
+    });
+
+    this.socket.on('room:incoming_call', (data) => {
+      eventBus.emit('socket:room_incoming_call', data);
+    });
+
+    // ── Encryption key exchange ───────────────────────────────────────────────
     this.socket.on('all_keys', (data) => {
       eventBus.emit('socket:all_keys', data);
     });
@@ -143,14 +194,12 @@ export const socketClient = {
       eventBus.emit('socket:peer_key', data);
     });
 
-    this.socket.on('message_history', (data) => {
-      eventBus.emit('socket:message_history', data);
+    // ── Admin ─────────────────────────────────────────────────────────────────
+    this.socket.on('admin:kicked', (data) => {
+      eventBus.emit('socket:admin_kicked', data);
     });
 
-    this.socket.on('error', (data) => {
-      eventBus.emit('socket:error', data);
-    });
-
+    // ── WebRTC / calls ────────────────────────────────────────────────────────
     this.socket.on('webrtc_signal', (data) => {
       eventBus.emit('socket:webrtc_signal', data);
     });
@@ -175,42 +224,23 @@ export const socketClient = {
       eventBus.emit('socket:call_ended', data);
     });
 
-    console.log('[LAN Chat V2] [DEBUG] Socket client initialized, transports:', isLocal ? 'polling,websocket' : 'websocket');
-
+    console.log('[LAN Chat V2] Socket client initialized');
     return this.socket;
   },
 
-  /**
-   * Get the socket instance
-   * @returns {Object|null} Socket.IO instance or null
-   */
   getSocket() {
     return this.socket;
   },
 
-  /**
-   * Check if socket is connected
-   * @returns {boolean} True if connected
-   */
   isConnected() {
     return !!(this.socket && this.socket.connected);
   },
 
-  /**
-   * Disconnect the socket
-   */
   disconnect() {
-    if (this.socket) {
-      this.socket.disconnect();
-    }
+    if (this.socket) this.socket.disconnect();
   },
 
-  /**
-   * Reconnect the socket
-   */
   reconnect() {
-    if (this.socket) {
-      this.socket.connect();
-    }
-  }
+    if (this.socket) this.socket.connect();
+  },
 };

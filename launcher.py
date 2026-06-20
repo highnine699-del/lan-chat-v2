@@ -2121,9 +2121,6 @@ class ControlCenter:
             except Exception:
                 pass
         self.root.bind("<Configure>", self._on_window_configure)
-            except Exception:
-                pass
-        self.root.bind("<Configure>", self._on_window_configure)
 
     def _on_window_configure(self, event=None):
         """Save geometry on resize/move (debounced via after)."""
