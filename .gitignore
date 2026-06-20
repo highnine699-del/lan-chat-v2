@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+backend/uploads/*.webm
+backend/uploads/*.mp3
+backend/uploads/*.pdf
+backend/chat.db
+*.log
+server.pid
+backend/server.pid
+launcher_config.json
