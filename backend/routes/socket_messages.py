@@ -5,6 +5,7 @@ routes/socket_messages.py
 Message handling Socket.IO handlers.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -60,6 +61,7 @@ def register_message_handlers(sio):
 
         if target == 'global':
             message_history.append(msg)
+            log.info('[DEBUG] Emitting new_message to global: from=%s', msg['from'])
             await sio.emit('new_message', msg)
         elif target in rooms:
             room = rooms[target]
@@ -253,8 +255,22 @@ def register_message_handlers(sio):
 
         display_name = str(data.get('name', filename))[:260]
 
+        # Detect voice/audio uploads so the frontend renders an audio player
+        # with duration instead of a generic file attachment.
+        client_duration = data.get('duration')
+        is_audio = bool(server_mime and server_mime.startswith('audio/'))
+        if is_audio and client_duration is not None:
+            try:
+                duration_val = float(client_duration)
+            except (TypeError, ValueError):
+                duration_val = 0.0
+            msg_type = 'voice'
+        else:
+            duration_val = None
+            msg_type = 'file'
+
         msg = {
-            'type': 'file',
+            'type': msg_type,
             'from': user['display'],
             'color': user['color'],
             'tag': user['tag'],
@@ -266,8 +282,11 @@ def register_message_handlers(sio):
             'to': target,
             'msg_id': msg_id,
         }
+        if duration_val is not None:
+            msg['duration'] = duration_val
+
         await dispatch_message(msg, target, sid)
-        _sl.message_sent(sid, user['display'], target, msg_id, 'file')
+        _sl.message_sent(sid, user['display'], target, msg_id, msg_type)
 
     # ── message:edit ──────────────────────────────────────────────────────────
 

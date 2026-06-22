@@ -5,6 +5,7 @@ routes/socket_rooms.py
 Room management Socket.IO handlers.
 """
 
+import asyncio
 import logging
 import secrets as _sec
 import time

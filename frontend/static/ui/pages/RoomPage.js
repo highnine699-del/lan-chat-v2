@@ -227,6 +227,16 @@ export class RoomPage {
 
     if (!roomId) {
       console.warn('[RoomPage] Room ID required');
+      // Show visual error feedback
+      const roomIdInput = document.getElementById('rm-join-id');
+      if (roomIdInput) {
+        roomIdInput.style.borderColor = 'var(--danger)';
+        roomIdInput.placeholder = 'Room ID is required!';
+        setTimeout(() => {
+          roomIdInput.style.borderColor = 'var(--border)';
+          roomIdInput.placeholder = 'Room ID (e.g. A3F9B2C1)';
+        }, 2000);
+      }
       return;
     }
 

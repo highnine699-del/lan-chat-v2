@@ -53,8 +53,12 @@ export const presence = {
    * @param {Array} users - User list
    */
   handleUserList(users) {
-    chatState.setUsers(users);
-    eventBus.emit('presence:user_list', users);
+    const enriched = (users || []).map(u => ({
+      ...u,
+      online: u.presence !== 'away' && u.presence !== 'offline',
+    }));
+    chatState.setUsers(enriched);
+    eventBus.emit('presence:user_list', enriched);
   },
 
   /**

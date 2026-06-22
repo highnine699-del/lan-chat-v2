@@ -97,11 +97,22 @@ export const messageHandler = {
     // Add to state
     chatState.addMessage(decrypted);
 
-    // Render
+    // Determine whether this message belongs to the view the user currently has
+    // open.  We evaluate BEFORE calling onRender so onNotify is not triggered
+    // for conversations the user is actively looking at.
+    const _cc  = chatState.currentChat;
+    const _cr  = chatState.currentRoom;
+    const isInCurrentView = (
+      (decrypted.to === 'global' && _cc === 'global') ||
+      (_cr && decrypted.to === _cr) ||
+      (!_cr && _cc !== 'global' && (decrypted.from === _cc || decrypted.to === _cc))
+    );
+
+    // Render — the callback in init.js does its own view-guard so this is safe
     if (onRender) onRender(decrypted);
 
-    // Notify
-    if (decrypted.from !== myDisplay && onNotify) {
+    // Notify only when the message is NOT already visible to the user
+    if (decrypted.from !== myDisplay && !isInCurrentView && onNotify) {
       onNotify(decrypted.from, decrypted.text || decrypted.name || '[File]');
     }
 

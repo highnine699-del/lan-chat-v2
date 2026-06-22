@@ -17,7 +17,13 @@ export const eventBus = {
   emit(event, data) {
     (this.listeners[event] || []).forEach(fn => {
       try {
-        fn(data);
+        const result = fn(data);
+        // Handle promise rejections from async functions
+        if (result && typeof result.catch === 'function') {
+          result.catch(err => {
+            console.error(`[eventBus] Unhandled promise rejection in listener for '${event}':`, err);
+          });
+        }
       } catch (err) {
         console.error(`[eventBus] Error in listener for '${event}':`, err);
       }

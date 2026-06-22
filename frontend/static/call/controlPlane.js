@@ -127,7 +127,6 @@ LANCHAT.controlPlane = (function () {
         startCall: function (type) {
             console.log('[ControlPlane] Starting call:', type);
 
-            // Check if we're already in a call
             var currentPhase = 'idle';
             if (LANCHAT.state && typeof LANCHAT.state.getCallPhase === 'function') {
                 currentPhase = LANCHAT.state.getCallPhase();
@@ -137,49 +136,16 @@ LANCHAT.controlPlane = (function () {
                 return;
             }
 
-            // Set call target and type
             var target = window.state && window.state.currentChat;
-            if (!target) {
-                console.error('[ControlPlane] No chat target selected');
+            if (!target || target === 'global') {
+                console.error('[ControlPlane] No valid chat target selected');
                 return;
             }
 
-            if (LANCHAT.state) {
-                if (typeof LANCHAT.state.setCallTarget === 'function') {
-                    LANCHAT.state.setCallTarget(target);
-                }
-                if (typeof LANCHAT.state.setCallType === 'function') {
-                    LANCHAT.state.setCallType(type);
-                }
-            }
-
-            console.log('[ControlPlane] About to transition to connecting');
-            // Transition to connecting phase
-            LANCHAT.lifecycle.transition('connecting');
-            console.log('[ControlPlane] Transitioned to connecting, phase is now:', LANCHAT.state.getCallPhase());
-
-            // Emit call initiation event via socket
-            var socket = window.state && window.state.socket;
-            if (socket) {
-                socket.emit('call_initiate', {
-                    target: target,
-                    type: type,
-                    roomId: window.state.currentRoom
-                });
-                console.log('[ControlPlane] Call initiation emitted to server');
+            if (window.LANCHAT && LANCHAT.callSession && typeof LANCHAT.callSession.beginOutgoingCall === 'function') {
+                LANCHAT.callSession.beginOutgoingCall(type);
             } else {
-                console.error('[ControlPlane] No socket connection');
-                LANCHAT.lifecycle.transition('failed');
-            }
-
-            // Show call UI
-            if (LANCHAT.ui) {
-                LANCHAT.ui.showOverlay(type);
-            }
-
-            // Set mood to connecting
-            if (LANCHAT.mood) {
-                LANCHAT.mood.set('connecting');
+                console.error('[ControlPlane] callSession not available');
             }
         },
     };

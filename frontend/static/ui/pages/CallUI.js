@@ -59,12 +59,8 @@ export class CallUI {
    * @private
    */
   _attachCallControlListeners() {
-    const endCallBtn = document.getElementById('end-call-btn');
-    if (endCallBtn) {
-      endCallBtn.addEventListener('click', () => {
-        this.onEndCall('user_ended');
-      });
-    }
+    // NOTE: end-call-btn is handled exclusively by callSession.init() to avoid
+    // double-firing lifecycle.endCall(). Do NOT add another listener here.
 
     const muteBtn = document.getElementById('mute-btn');
     if (muteBtn) {
@@ -73,7 +69,8 @@ export class CallUI {
       });
     }
 
-    const cameraBtn = document.getElementById('camera-btn');
+    // HTML id is 'cam-btn' — not 'camera-btn'
+    const cameraBtn = document.getElementById('cam-btn');
     if (cameraBtn) {
       cameraBtn.addEventListener('click', () => {
         this.onToggleCamera();
@@ -167,10 +164,10 @@ export class CallUI {
    * @param {boolean} off - Camera off state
    */
   updateCameraState(off) {
-    const cameraBtn = document.getElementById('camera-btn');
+    const cameraBtn = document.getElementById('cam-btn'); // HTML id is cam-btn
     if (cameraBtn) {
-      cameraBtn.classList.toggle('off', off);
-      cameraBtn.innerHTML = off ? '📷' : '📹';
+      cameraBtn.classList.toggle('cam-off', off);
+      cameraBtn.title = off ? 'Camera on' : 'Camera off';
     }
   }
 

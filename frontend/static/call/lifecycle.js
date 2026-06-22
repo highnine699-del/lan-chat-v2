@@ -61,39 +61,36 @@ LANCHAT.lifecycle = (function () {
         },
 
         // End call - V2 implementation
-        // This replaces the V1 endCall global function
         endCall: function (reason) {
             console.log('[Lifecycle] ENDING CALL - reason:', reason);
-            console.log('[Lifecycle] ENDING CALL - stack trace:', new Error().stack);
-            
-            // Force to idle state
-            this.forceIdle();
-            
-            // Reset call state
-            LANCHAT.state.reset();
-            
-            // Clean up peer connection if it exists
+
+            // Clean up peer connection before reset clears the reference
             var pc = LANCHAT.state.getPeerConnection();
             if (pc) {
                 pc.close();
-                LANCHAT.state.setPeerConnection(null);
             }
-            
+
+            // Force to idle state
+            this.forceIdle();
+
+            // Reset call state
+            LANCHAT.state.reset();
+
             // Drain ICE buffers
             if (LANCHAT.ice) {
                 LANCHAT.ice.drain();
             }
-            
+
             // Hide call UI
             if (LANCHAT.ui) {
                 LANCHAT.ui.hideOverlay();
             }
-            
+
             // Reset mood
             if (LANCHAT.mood) {
                 LANCHAT.mood.set('idle');
             }
-            
+
             console.log('[Lifecycle] Call ended successfully');
         },
     };

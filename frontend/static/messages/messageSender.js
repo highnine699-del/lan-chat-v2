@@ -7,6 +7,7 @@
 import { encryption } from '../core/encryption.js';
 import { chatState } from '../core/state/chatState.js';
 import { cryptoState } from '../core/state/cryptoState.js';
+import { eventBus } from '../core/eventBus.js';
 
 export const messageSender = {
   /**
@@ -103,6 +104,28 @@ export const messageSender = {
   },
 
   /**
+   * Send a voice message (uploaded audio file)
+   * @param {Object} data - Upload response { url }
+   * @param {number} duration - Duration in seconds
+   * @param {Object} socket - Socket instance
+   * @param {Function} onError - Error callback
+   */
+  async sendVoice(data, duration, socket, onError) {
+    if (!data?.url || !socket) {
+      if (onError) onError('Upload failed');
+      return;
+    }
+
+    socket.emit('send_file', {
+      to: chatState.currentChat,
+      url: data.url,
+      name: `voice_${Date.now()}.webm`,
+      file_type: 'audio/webm',
+      duration,
+    });
+  },
+
+  /**
    * Send a file
    * @param {File} file - File to send
    * @param {Object} socket - Socket instance
@@ -113,22 +136,28 @@ export const messageSender = {
     const formData = new FormData();
     formData.append('file', file);
 
+    eventBus.emit('file:uploading', file);
+
     try {
       const res = await fetch('/upload', { method: 'POST', body: formData });
       const data = await res.json();
 
       if (!res.ok) {
+        eventBus.emit('file:upload_failed', data.error || `Server error ${res.status}`);
         if (onError) onError('Upload failed: ' + (data.error || `Server error ${res.status}`));
         return;
       }
 
+      eventBus.emit('file:uploaded', data);
+
       socket.emit('send_file', {
         to: chatState.currentChat,
         url: data.url,
-        name: data.name,
+        name: data.name || file.name,
         file_type: file.type
       });
     } catch (err) {
+      eventBus.emit('file:upload_error', err.message);
       if (onError) onError('Upload failed: ' + err.message);
     }
   },

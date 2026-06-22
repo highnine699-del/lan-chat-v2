@@ -229,7 +229,9 @@ def register_auth_handlers(sio):
         if pub_key:
             await sio.emit('peer_key', {'username': display, 'publicKey': pub_key}, skip_sid=sid)
 
-        await sio.emit('user_list', get_user_list())
+        user_list = get_user_list()
+        log.info('[DEBUG] Emitting user_list to all clients: %d users', len(user_list))
+        await sio.emit('user_list', user_list)
         await sio.emit('system_message', system_msg(f'{display} joined'))
         log.info('[SESSION] actor=%s handler=join', display)
         _sl.session_joined(sid, display, client_ip, uid_reclaimed=(uid == client_uid), is_admin=is_server_admin)

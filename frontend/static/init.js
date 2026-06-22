@@ -16,7 +16,7 @@ import { callState } from './call/state.js';
 // Import subsystem modules
 import { messageHandler, messageSender, messageRenderer, decryption } from './messages/index.js';
 import { roomManager, roomUI, roomComponent } from './rooms/index.js';
-import { controlPlane, healthEngine, lifecycle, callUI, moodEngine, signalEmit, iceManager, mediaValidator, statsEngine } from './call/index.js';
+import { controlPlane, healthEngine, lifecycle, callUI, moodEngine, signalEmit, iceManager, mediaValidator, statsEngine, callSession } from './call/index.js';
 
 // Import feature modules
 import { typing, presence, voiceMessages, files, reactions, admin } from './features/index.js';
@@ -27,6 +27,7 @@ import { MessageItem, UserItem, InputBar, Modal } from './ui/components/index.js
 
 // Import utils
 import { dom, time, validation, storage, analytics } from './utils/index.js';
+import { sidebarManager } from './ui/sidebarManager.js';
 
 // V2 state modules own the state
 // window.state is now a legacy proxy for V1 compatibility
@@ -130,6 +131,7 @@ window.LANCHAT = {
     iceManager,
     mediaValidator,
     statsEngine,
+    callSession,
     state: callState,
   },
   lifecycle,
@@ -167,7 +169,8 @@ window.LANCHAT = {
 // reference LANCHAT.state, LANCHAT.lifecycle, LANCHAT.ui, LANCHAT.mood directly
 // But init.js overwrites window.LANCHAT, so we need to restore these references
 // for compatibility with the legacy call module architecture
-// callState is available via LANCHAT.call.state — do NOT overwrite LANCHAT.state
+// IMPORTANT: LANCHAT.state must point to callState for legacy call modules to work
+window.LANCHAT.state = callState;
 window.LANCHAT.lifecycle = lifecycle;
 window.LANCHAT.ui = callUI;
 window.LANCHAT.mood = moodEngine;
@@ -177,6 +180,7 @@ window.LANCHAT.media = mediaValidator;
 window.LANCHAT.stats = statsEngine;
 window.LANCHAT.ice = iceManager;
 window.LANCHAT.signal = signalEmit;
+window.LANCHAT.callSession = callSession;
 // Restore the EventTarget for the legacy call modules (callUI.js, moodEngine.js,
 // controlPlane.js all call LANCHAT.events.dispatchEvent / addEventListener).
 // The V2 eventBus is available via ES module import; no need to put it on LANCHAT.
@@ -221,9 +225,19 @@ async function init() {
   // Initialize V2 modules - subscribe to eventBus
   messageHandler.init(
     (msg) => {
-      // renderer.createMessageElement builds the DOM node; we insert it into #messages
+      // ACK status updates
+      if (msg?.tempId && msg?.status) return;
+
       const container = document.getElementById('messages');
       if (!container) return;
+
+      const chat = chatState.currentChat;
+      const isGlobal = chat === 'global' && msg.to === 'global';
+      const isRoom = chatState.currentRoom && msg.to === chatState.currentRoom;
+      const isDm = !chatState.currentRoom && chat !== 'global' &&
+        (msg.from === chat || msg.to === chat);
+      if (!isGlobal && !isRoom && !isDm) return;
+
       const display = chatState.getDisplay();
       const isOwn = msg.from === display;
       const el = messageRenderer.createMessageElement(msg, { isOwn });
@@ -232,12 +246,14 @@ async function init() {
         container.scrollTop = container.scrollHeight;
       }
     },
-    (from, text) => console.log('[LAN Chat V2] [DEBUG] Notification from:', from, text)
+    (from, text) => console.log('[LAN Chat V2] Notification from:', from, text)
   );
   roomManager.init();
   typing.init();
   presence.init();
   reactions.init();
+  sidebarManager.init();
+  callSession.init();
 
   // Initialize V2 page components - attach event listeners to DOM
   const chatPage = new ChatPage({
@@ -259,53 +275,17 @@ async function init() {
       }
     },
     onFileUpload: (file) => {
-      if (window.LANCHAT && window.LANCHAT.features && window.LANCHAT.features.files) {
-        window.LANCHAT.features.files.upload(file, (data, error) => {
-          if (error) {
-            console.error('[LAN Chat V2] File upload error:', error);
-            alert(error);
-          } else if (data && data.url) {
-            const socket = chatState.getSocket();
-            if (socket) {
-              socket.emit('message', {
-                type: 'file',
-                url: data.url,
-                name: file.name,
-                size: file.size,
-                room: chatState.currentRoom || 'global'
-              });
-            }
-          }
-        });
-      }
+      _showUploadProgress(file.name);
+      messageSender.sendFile(file, chatState.getSocket(), null, (err) => {
+        _hideUploadProgress();
+        if (err) alert(err);
+      }).then(() => _hideUploadProgress()).catch(() => _hideUploadProgress());
     },
     onVoiceRecord: () => {
-      if (window.LANCHAT && window.LANCHAT.features && window.LANCHAT.features.voiceMessages) {
-        window.LANCHAT.features.voiceMessages.toggle(
-          null, // onWaveformUpdate - can be null for basic toggle
-          (data) => {
-            // onUpload - send the uploaded voice message
-            if (data && data.url) {
-              const socket = chatState.getSocket();
-              if (socket) {
-                socket.emit('message', {
-                  type: 'voice',
-                  url: data.url,
-                  duration: window.LANCHAT.features.voiceMessages.getDuration(),
-                  room: chatState.currentRoom || 'global'
-                });
-              }
-            }
-          },
-          (error) => {
-            console.error('[LAN Chat V2] Voice recording error:', error);
-            alert(error);
-          }
-        );
-      }
+      _startVoiceRecording();
     },
     onEmojiToggle: () => {
-      console.log('[LAN Chat V2] [DEBUG] Emoji toggle - implement');
+      _toggleEmojiPicker();
     },
   });
   chatPage.init();
@@ -368,10 +348,39 @@ async function init() {
       }
     },
     onToggleMute: () => {
-      console.log('[LAN Chat V2] [DEBUG] Toggle mute - implement');
+      const stream = window.state?.localStream;
+      if (stream) {
+        const tracks = stream.getAudioTracks();
+        if (!tracks.length) return;
+        // Toggle: enabled→muted, muted→enabled
+        const nowMuted = tracks[0].enabled;   // if currently enabled, we're about to mute
+        tracks.forEach(t => { t.enabled = !t.enabled; });
+        // Update button visual
+        const muteBtn = document.getElementById('mute-btn');
+        if (muteBtn) {
+          muteBtn.classList.toggle('muted', nowMuted);
+          muteBtn.title = nowMuted ? 'Unmute' : 'Mute';
+          // Update SVG / emoji if the button uses one of those
+          const svg = muteBtn.querySelector('svg');
+          if (!svg) {
+            muteBtn.textContent = nowMuted ? '🔇' : '🎤';
+          }
+        }
+      }
     },
     onToggleCamera: () => {
-      console.log('[LAN Chat V2] [DEBUG] Toggle camera - implement');
+      const stream = window.state?.localStream;
+      if (stream) {
+        const tracks = stream.getVideoTracks();
+        if (!tracks.length) return;
+        const nowOff = tracks[0].enabled;   // currently enabled → about to turn off
+        tracks.forEach(t => { t.enabled = !t.enabled; });
+        const camBtn = document.getElementById('cam-btn');
+        if (camBtn) {
+          camBtn.classList.toggle('cam-off', nowOff);
+          camBtn.title = nowOff ? 'Camera on' : 'Camera off';
+        }
+      }
     },
   });
   callUI.init();
@@ -380,6 +389,8 @@ async function init() {
 
   // Attach event listeners for UI elements
   attachUIListeners();
+  _setupMediaFeedback();
+  _setupEmojiPicker();
 }
 
 /**
@@ -445,18 +456,7 @@ function attachUIListeners() {
     console.log('[LAN Chat V2] [DEBUG] Send button listener attached');
   }
 
-  // Also allow Enter key to send
-  if (msgInput) {
-    msgInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        if (window.LANCHAT && window.LANCHAT.messages && window.LANCHAT.messages.sender) {
-          window.LANCHAT.messages.sender.sendTextMessage(msgInput.value, chatState.getSocket());
-          msgInput.value = '';
-        }
-      }
-    });
-  }
+  // NOTE: Enter-to-send is already wired above; no duplicate listener needed.
 
   // Random alias generator button
   const aliasBtn = document.querySelector('.alias-gen-btn');
@@ -486,16 +486,6 @@ function attachUIListeners() {
 
   // ── Feature buttons ────────────────────────────────────────────────────────
 
-  // Emoji picker toggle
-  const emojiBtn = document.getElementById('emoji-btn');
-  const emojiContainer = document.getElementById('emoji-container');
-  if (emojiBtn && emojiContainer) {
-    emojiBtn.addEventListener('click', () => {
-      const visible = emojiContainer.style.display !== 'none';
-      emojiContainer.style.display = visible ? 'none' : 'block';
-    });
-  }
-
   // Attachment button → triggers file input
   const attachBtn = document.getElementById('attach-btn');
   const fileInput = document.getElementById('file-input');
@@ -503,45 +493,36 @@ function attachUIListeners() {
     attachBtn.addEventListener('click', () => fileInput.click());
   }
 
-  // Voice record button
+  // Emoji button — toggle emoji picker
+  const emojiBtn = document.getElementById('emoji-btn');
+  if (emojiBtn) {
+    emojiBtn.addEventListener('click', () => _toggleEmojiPicker());
+    console.log('[LAN Chat V2] [DEBUG] Emoji button listener attached');
+  } else {
+    console.error('[LAN Chat V2] [DEBUG] emoji-btn not found');
+  }
+
+  // Voice record button — start recording (send/cancel via record bar)
   const micBtn = document.getElementById('mic-btn');
   if (micBtn) {
-    micBtn.addEventListener('click', () => {
-      console.log('[LAN Chat V2] [DEBUG] Mic button clicked');
-      if (window.LANCHAT && window.LANCHAT.features && window.LANCHAT.features.voiceMessages) {
-        console.log('[LAN Chat V2] [DEBUG] Calling voiceMessages.toggle');
-        window.LANCHAT.features.voiceMessages.toggle(
-          null, // onWaveformUpdate - can be null for basic toggle
-          (data) => {
-            // onUpload - send the uploaded voice message
-            if (data && data.url) {
-              const socket = chatState.getSocket();
-              if (socket) {
-                socket.emit('message', {
-                  type: 'voice',
-                  url: data.url,
-                  duration: window.LANCHAT.features.voiceMessages.getDuration(),
-                  room: chatState.currentRoom || 'global'
-                });
-              }
-            }
-          },
-          (error) => {
-            console.error('[LAN Chat V2] Voice recording error:', error);
-            alert(error);
-          }
-        );
-      } else {
-        console.error('[LAN Chat V2] [DEBUG] Voice messages feature not available', {
-          hasLANCHAT: !!window.LANCHAT,
-          hasFeatures: !!(window.LANCHAT && window.LANCHAT.features),
-          hasVoice: !!(window.LANCHAT && window.LANCHAT.features && window.LANCHAT.features.voiceMessages)
-        });
-      }
-    });
+    micBtn.addEventListener('click', () => _startVoiceRecording());
     console.log('[LAN Chat V2] [DEBUG] Mic button listener attached');
   } else {
     console.error('[LAN Chat V2] [DEBUG] mic-btn not found');
+  }
+
+  const recCancelBtn = document.getElementById('rec-cancel-btn');
+  if (recCancelBtn) {
+    recCancelBtn.addEventListener('click', () => {
+      voiceMessages.cancelRecording();
+    });
+  }
+
+  const recSendBtn = document.getElementById('rec-send-btn');
+  if (recSendBtn) {
+    recSendBtn.addEventListener('click', () => {
+      _stopAndSendVoice();
+    });
   }
 
   // Mobile sidebar close
@@ -681,10 +662,34 @@ function attachUIListeners() {
     if (placeholder) placeholder.style.display = 'none';
     if (activeChat) activeChat.style.display = 'flex';
 
-    // Mark global chat as selected in sidebar
-    document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
-    const globalItem = document.getElementById('chat-item-global');
-    if (globalItem) globalItem.classList.add('active');
+    // Mark global chat as selected and render sidebar data
+    sidebarManager.switchChat('global');
+
+    // ── Request room list from server (server only sends it on create or
+    // explicit request; client must ask for it after login) ──────────────────
+    const _sock = chatState.getSocket();
+    if (_sock) {
+      _sock.emit('room:list', {});
+    }
+
+    // ── Reliability re-renders ───────────────────────────────────────────────
+    // user_list and room:list arrive over the network with no guarantee the
+    // first broadcast lands after all listeners are wired.  We re-render from
+    // already-cached state after 800 ms as a safety net.
+    setTimeout(() => {
+      const users = chatState.getUsers?.() || chatState.users || [];
+      if (users.length > 0) sidebarManager.renderUserList(users);
+
+      const rooms = chatState.getRoomList?.() || chatState.roomList || [];
+      if (rooms.length > 0) sidebarManager.renderRoomList(rooms);
+
+      // If still empty, ask the server for the room list again
+      const sock2 = chatState.getSocket();
+      if (sock2 && rooms.length === 0) sock2.emit('room:list', {});
+    }, 800);
+
+    // Load ICE config for calls
+    config.getIceConfig(chatState.getSocket()?.id || '').catch(() => {});
 
     // Attach sidebar collapse listener after app is visible
     const sidebarCollapseBtn = document.getElementById('sidebar-collapse-btn');
@@ -709,6 +714,197 @@ function attachUIListeners() {
       } else {
         alert(data.message || 'Login error');
       }
+    }
+  });
+}
+
+/**
+ * Show upload progress bar
+ */
+function _showUploadProgress(filename) {
+  const bar = document.getElementById('upload-progress-bar');
+  const label = document.getElementById('upload-progress-label');
+  const fill = document.getElementById('upload-progress-fill');
+  const pct = document.getElementById('upload-progress-pct');
+  if (bar) bar.style.display = 'block';
+  if (label) label.textContent = `Uploading ${filename}…`;
+  if (fill) fill.style.width = '30%';
+  if (pct) pct.textContent = '…';
+}
+
+/**
+ * Hide upload progress bar
+ */
+function _hideUploadProgress() {
+  const bar = document.getElementById('upload-progress-bar');
+  const fill = document.getElementById('upload-progress-fill');
+  if (fill) fill.style.width = '100%';
+  setTimeout(() => {
+    if (bar) bar.style.display = 'none';
+    if (fill) fill.style.width = '0%';
+  }, 400);
+}
+
+/**
+ * Toggle emoji picker visibility
+ */
+function _toggleEmojiPicker() {
+  const container = document.getElementById('emoji-container');
+  if (!container) {
+    console.error('[LAN Chat V2] [DEBUG] emoji-container not found');
+    return;
+  }
+  const visible = container.style.display === 'block';
+  container.style.display = visible ? 'none' : 'block';
+  console.log('[LAN Chat V2] [DEBUG] Emoji picker toggled:', !visible);
+}
+
+/**
+ * Initialize emoji picker click handler
+ */
+function _setupEmojiPicker() {
+  // The emoji-picker custom element is registered asynchronously by emoji-picker-picker.js
+  // which loads as a separate module. We must wait for it to be defined before
+  // attaching the 'emoji-click' event listener, otherwise the listener silently drops.
+  const attachEmojiListener = () => {
+    const picker = document.querySelector('emoji-picker');
+    if (!picker) return;
+    picker.addEventListener('emoji-click', (e) => {
+      const emoji = e.detail?.unicode || e.detail?.emoji?.unicode;
+      const input = document.getElementById('msg-input');
+      if (input && emoji) {
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? input.value.length;
+        input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+        input.selectionStart = input.selectionEnd = start + emoji.length;
+        input.focus();
+        // Close picker after selection
+        const container = document.getElementById('emoji-container');
+        if (container) container.style.display = 'none';
+      }
+    });
+  };
+
+  if (customElements && customElements.whenDefined) {
+    customElements.whenDefined('emoji-picker').then(attachEmojiListener).catch(() => {
+      // Fallback: try attaching after a short delay
+      setTimeout(attachEmojiListener, 1500);
+    });
+  } else {
+    // No custom-elements support — fallback
+    setTimeout(attachEmojiListener, 1500);
+  }
+
+  document.addEventListener('click', (e) => {
+    const container = document.getElementById('emoji-container');
+    const btn = document.getElementById('emoji-btn');
+    if (!container || container.style.display !== 'block') return;
+    if (container.contains(e.target) || btn?.contains(e.target)) return;
+    container.style.display = 'none';
+  });
+}
+
+/**
+ * Wire voice recording UI feedback
+ */
+function _setupMediaFeedback() {
+  eventBus.on('voice:recording_started', () => {
+    console.log('[LAN Chat V2] [DEBUG] voice:recording_started event received');
+    const recordBar = document.getElementById('record-bar');
+    const inputArea = document.getElementById('input-area');
+    const micBtn = document.getElementById('mic-btn');
+    console.log('[LAN Chat V2] [DEBUG] Elements found:', {
+      recordBar: !!recordBar,
+      inputArea: !!inputArea,
+      micBtn: !!micBtn
+    });
+    if (recordBar) {
+      recordBar.classList.add('active');
+      console.log('[LAN Chat V2] [DEBUG] Added active class to record-bar');
+    }
+    if (inputArea) {
+      inputArea.style.display = 'none';
+      console.log('[LAN Chat V2] [DEBUG] Hid input-area');
+    }
+    if (micBtn) {
+      micBtn.classList.add('recording');
+      console.log('[LAN Chat V2] [DEBUG] Added recording class to mic-btn');
+    }
+  });
+
+  eventBus.on('voice:time_update', (seconds) => {
+    const timeEl = document.getElementById('record-time');
+    if (timeEl) {
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      timeEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+    }
+  });
+
+  const _resetVoiceUI = () => {
+    const recordBar = document.getElementById('record-bar');
+    const inputArea = document.getElementById('input-area');
+    const micBtn = document.getElementById('mic-btn');
+    const timeEl = document.getElementById('record-time');
+    if (recordBar) recordBar.classList.remove('active');
+    if (inputArea) inputArea.style.display = '';
+    if (micBtn) micBtn.classList.remove('recording');
+    if (timeEl) timeEl.textContent = '0:00';
+  };
+
+  eventBus.on('voice:recording_stopped', () => {
+    // Hide record bar and restore input area immediately so the upload
+    // progress bar (shown next) sits in the right place.
+    _resetVoiceUI();
+    _showUploadProgress('voice note');
+  });
+
+  eventBus.on('voice:uploaded', () => {
+    _hideUploadProgress();
+    _resetVoiceUI();
+  });
+
+  eventBus.on('voice:recording_cancelled', _resetVoiceUI);
+  eventBus.on('voice:upload_failed', () => {
+    _hideUploadProgress();
+    _resetVoiceUI();
+    alert('Voice upload failed');
+  });
+  eventBus.on('voice:error', () => _resetVoiceUI());
+
+  eventBus.on('file:uploading', (file) => {
+    if (file?.name) _showUploadProgress(file.name);
+  });
+  eventBus.on('file:uploaded', _hideUploadProgress);
+  eventBus.on('file:upload_failed', () => {
+    _hideUploadProgress();
+  });
+  eventBus.on('file:upload_error', () => {
+    _hideUploadProgress();
+  });
+}
+
+/**
+ * Start voice recording
+ */
+function _startVoiceRecording() {
+  voiceMessages.startRecording(null, (err) => {
+    alert(err);
+  });
+}
+
+/**
+ * Stop recording and send voice message
+ */
+function _stopAndSendVoice() {
+  voiceMessages.stopRecording((data) => {
+    if (data?.url) {
+      messageSender.sendVoice(
+        data,
+        voiceMessages.getDuration(),
+        chatState.getSocket(),
+        (err) => alert(err)
+      );
     }
   });
 }
@@ -775,6 +971,8 @@ function logout() {
 window.LANCHAT.init = init;
 window.LANCHAT.login = login;
 window.LANCHAT.logout = logout;
+window.switchChat = (chatId) => sidebarManager.switchChat(chatId);
+window.startCall = (type) => controlPlane.startCall(type);
 
 // Auto-initialize on load
 if (document.readyState === 'loading') {

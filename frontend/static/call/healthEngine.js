@@ -128,4 +128,4 @@ LANCHAT.health = (function () {
 }());
 
 // Export for ES6 module imports
-export const healthEngine = LANCHAT.healthEngine;
+export const healthEngine = LANCHAT.health;

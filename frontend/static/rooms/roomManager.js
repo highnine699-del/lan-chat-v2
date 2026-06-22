@@ -186,6 +186,17 @@ export const roomManager = {
     chatState.setCurrentRoom(room_id, name);
     if (!chatState.messages[room_id]) chatState.messages[room_id] = [];
 
+    // Load room history sent by the server in 'room:joined'.
+    // Previously this array was ignored, causing an empty chat on first open.
+    if (Array.isArray(data.history) && data.history.length > 0) {
+      data.history.forEach(msg => {
+        // Only add if not already stored (avoid duplicates on re-join)
+        const stored = chatState.messages[room_id];
+        const alreadyExists = stored.some(m => m.msg_id && m.msg_id === msg.msg_id);
+        if (!alreadyExists) chatState.addMessage(msg);
+      });
+    }
+
     eventBus.emit('room:joined', data);
   },
 

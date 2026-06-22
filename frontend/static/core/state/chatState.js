@@ -232,7 +232,12 @@ export const chatState = {
     if (msg.to === 'global') return 'global';
     const isRoomMsg = msg.to && (msg.to === this.currentRoom || this.currentRoom === msg.to);
     if (isRoomMsg) return msg.to;
-    return msg.from === this.currentChat ? msg.to : msg.from;
+    // DMs: always key by the OTHER person's display name regardless of which
+    // chat the user currently has open.  Using currentChat here was the bug —
+    // it changes as the user navigates, so the same message could be stored
+    // under a different key depending on navigation state.
+    const myDisplay = this.display;
+    return msg.from === myDisplay ? msg.to : msg.from;
   },
 
   /**

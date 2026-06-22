@@ -14,3 +14,4 @@ export { signalEmit } from './signalEmit.js';
 export { iceManager } from './iceManager.js';
 export { mediaValidator } from './mediaValidator.js';
 export { statsEngine } from './statsEngine.js';
+export { callSession } from './callSession.js';
